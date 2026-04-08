@@ -42,6 +42,21 @@ def compute_rsi(series, length=14):
     return 100 - (100 / (1 + rs))
 
 
+def compute_atr(df, length=14):
+    high = df["High"]
+    low = df["Low"]
+    close = df["Close"]
+    prev_close = close.shift(1)
+
+    tr1 = high - low
+    tr2 = (high - prev_close).abs()
+    tr3 = (low - prev_close).abs()
+
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    atr = tr.rolling(length, min_periods=1).mean()
+    return atr
+
+
 def detect_hammer(df):
     o = df["Open"]
     c = df["Close"]
@@ -53,12 +68,15 @@ def detect_hammer(df):
     lower_shadow = (o.where(o < c, c) - l)
     upper_shadow = (h - o.where(o > c, c))
 
-    return (
+    # تحسين الإشارة: جسم أصغر، ظل سفلي أطول، شمعة خضراء مفضلة
+    cond_basic = (
         (candle_range > 0) &
-        (body <= candle_range * 0.4) &
-        (lower_shadow >= candle_range * 0.4) &
+        (body <= candle_range * 0.35) &
+        (lower_shadow >= candle_range * 0.5) &
         (upper_shadow <= candle_range * 0.2)
     )
+    cond_bullish = c >= o  # هامر صاعد
+    return cond_basic & cond_bullish
 
 
 def load_spy_regime():
@@ -88,10 +106,11 @@ def load_spy_regime():
     return raw["Bull"]
 
 
-# ----------------- بناء الإشارات -----------------
+# ----------------- بناء الإشارات (بدون VWAP + تحسين) -----------------
 def build_signals(df, spy_bull):
     df["Hammer"] = detect_hammer(df)
     df["Rsi"] = compute_rsi(df["Close"])
+    df["Atr14"] = compute_atr(df, 14)
     df["Sma10"] = df["Close"].rolling(10, min_periods=1).mean()
     df["Sma20"] = df["Close"].rolling(20, min_periods=1).mean()
     df["Downtrend"] = (df["Close"] < df["Sma10"]) & (df["Sma10"] < df["Sma20"])
@@ -100,20 +119,27 @@ def build_signals(df, spy_bull):
     df["Confirm"] = df["Close"].shift(-1) > df["High"]
     df["Bull"] = spy_bull.reindex(df.index).fillna(False)
 
+    # تحسين الإشارة:
+    # - RSI بين 20 و 60 (أقل من 70 لتجنب التشبع)
+    # - حجم الشمعة (المدى) أكبر من نصف ATR
+    candle_range = df["High"] - df["Low"]
+    strong_range = candle_range > 0.5 * df["Atr14"]
+
     df["Signal"] = (
         df["Hammer"]
         & df["Downtrend"]
         & df["Confirm"]
-        & df["Rsi"].between(20, 70)
+        & df["Rsi"].between(20, 60)
         & (df["Volume"] > 0.7 * df["Vol20"])
         & df["Bull"]
+        & strong_range
     )
 
     return df
 
 
 # ----------------- صفقات: دخول Next Open خروج Same Close -----------------
-def simulate_trades(df):
+def simulate_trades(df, ticker):
     trades = []
     signal_dates = df.index[df["Signal"]].tolist()
 
@@ -133,6 +159,7 @@ def simulate_trades(df):
 
         trades.append(
             {
+                "ticker": ticker,
                 "entry_date": entry_date,
                 "entry_price": entry_open,
                 "exit_date": entry_date,
@@ -143,7 +170,7 @@ def simulate_trades(df):
         )
 
     if not trades:
-        return pd.DataFrame(columns=["entry_date", "entry_price", "exit_date", "exit_price", "exit_reason", "return_pct"])
+        return pd.DataFrame(columns=["ticker", "entry_date", "entry_price", "exit_date", "exit_price", "exit_reason", "return_pct"])
 
     trades_df = pd.DataFrame(trades)
     trades_df.sort_values("entry_date", inplace=True)
@@ -180,17 +207,36 @@ def summarize_trades(trades_df):
     }
 
 
-# ----------------- الباك تست الرئيسي -----------------
+def equity_curve_from_trades(trades_df):
+    if trades_df.empty:
+        return pd.Series(dtype=float)
+
+    eq = (1 + trades_df["return_pct"] / 100.0).cumprod()
+    eq.index = trades_df["exit_date"]
+    return eq
+
+
+# ----------------- باك تست سهم واحد -----------------
 def backtest_ticker(ticker, spy_bull):
     try:
         df_raw = yf.download(ticker, start=START, auto_adjust=False, progress=False)
         if df_raw is None or df_raw.empty:
-            return {"log": f"{ticker}: DATA EMPTY", "summary": None, "trades": pd.DataFrame()}
+            return {
+                "log": f"{ticker}: DATA EMPTY",
+                "summary": None,
+                "trades": pd.DataFrame(),
+                "equity": pd.Series(dtype=float),
+            }
 
         df = normalize(df_raw)
 
         if df["Close"].isna().all():
-            return {"log": f"{ticker}: ERROR – Close prices all NaN", "summary": None, "trades": pd.DataFrame()}
+            return {
+                "log": f"{ticker}: ERROR – Close prices all NaN",
+                "summary": None,
+                "trades": pd.DataFrame(),
+                "equity": pd.Series(dtype=float),
+            }
 
         df = build_signals(df, spy_bull)
 
@@ -200,20 +246,43 @@ def backtest_ticker(ticker, spy_bull):
             f"  signals: {df['Signal'].sum()}\n"
         )
 
-        trades_df = simulate_trades(df)
+        trades_df = simulate_trades(df, ticker)
         summary = summarize_trades(trades_df)
+        equity = equity_curve_from_trades(trades_df)
 
-        return {"log": log, "summary": summary, "trades": trades_df}
+        return {
+            "log": log,
+            "summary": summary,
+            "trades": trades_df,
+            "equity": equity,
+        }
 
     except Exception as e:
-        return {"log": f"{ticker}: ERROR {e}", "summary": None, "trades": pd.DataFrame()}
+        return {
+            "log": f"{ticker}: ERROR {e}",
+            "summary": None,
+            "trades": pd.DataFrame(),
+            "equity": pd.Series(dtype=float),
+        }
+
+
+# ----------------- محفظة كاملة -----------------
+def build_portfolio_equity(all_trades_df):
+    if all_trades_df.empty:
+        return pd.Series(dtype=float)
+
+    # نفترض أن كل صفقة وزنها متساوٍ، ونضرب العوائد بالتسلسل حسب التاريخ
+    all_trades_df = all_trades_df.sort_values("exit_date").copy()
+    eq = (1 + all_trades_df["return_pct"] / 100.0).cumprod()
+    eq.index = all_trades_df["exit_date"]
+    return eq
 
 
 # ----------------- واجهة Streamlit -----------------
-st.set_page_config(page_title="Hammer Backtest – Intraday", layout="wide")
+st.set_page_config(page_title="Hammer Portfolio Backtest – No VWAP", layout="wide")
 
-st.title("Hammer Backtest – دخول Next Open وخروج Same Close")
-st.write("هذا النموذج يحول إشارات الهامر إلى صفقات يومية بدون VWAP.")
+st.title("Hammer Backtest – محفظة كاملة (دخول Next Open وخروج Same Close، بدون VWAP)")
+st.write("إشارات هامر محسّنة + ترند هابط + RSI + فوليوم + Bull SPY، مع باك تست لكل سهم ومحفظة كاملة ورسوم بيانية.")
 
 with st.spinner("جاري تحميل بيانات SPY..."):
     spy_regime = load_spy_regime()
@@ -231,7 +300,10 @@ if run_button:
     if not selected_tickers:
         st.warning("اختر سهم واحد على الأقل.")
     else:
-        st.write("### النتائج")
+        st.write("### النتائج لكل سهم")
+
+        all_summaries = []
+        all_trades_list = []
 
         for ticker in selected_tickers:
             st.write("---")
@@ -245,6 +317,7 @@ if run_button:
 
             summary = result["summary"]
             trades_df = result["trades"]
+            equity = result["equity"]
 
             if summary:
                 st.write("#### Summary")
@@ -256,11 +329,52 @@ if run_button:
                     f"- أكبر خسارة: {summary['max_loss']:.2f}%\n"
                     f"- العائد التراكمي: {summary['cum_return']:.2f}%"
                 )
+                row = summary.copy()
+                row["ticker"] = ticker
+                all_summaries.append(row)
 
             if not trades_df.empty:
                 st.write("#### الصفقات")
                 st.dataframe(trades_df)
+                all_trades_list.append(trades_df)
             else:
                 st.info("لا توجد صفقات.")
+
+            if not equity.empty:
+                st.write("#### Equity Curve (سهم واحد)")
+                st.line_chart(equity)
+
+        # مقارنة بين الأسهم
+        if all_summaries:
+            st.write("---")
+            st.write("### مقارنة بين الأسهم")
+            summary_df = pd.DataFrame(all_summaries).set_index("ticker")
+            st.dataframe(summary_df.sort_values("cum_return", ascending=False))
+
+            st.write("#### عائد تراكمي لكل سهم")
+            st.bar_chart(summary_df["cum_return"])
+
+        # محفظة كاملة
+        if all_trades_list:
+            st.write("---")
+            st.write("### محفظة كاملة (كل الصفقات من كل الأسهم)")
+
+            portfolio_trades = pd.concat(all_trades_list, ignore_index=True)
+            portfolio_equity = build_portfolio_equity(portfolio_trades)
+
+            st.write("#### Equity Curve للمحفظة")
+            st.line_chart(portfolio_equity)
+
+            # ملخص المحفظة
+            port_summary = summarize_trades(portfolio_trades)
+            st.write("#### Summary للمحفظة")
+            st.write(
+                f"- عدد الصفقات: {port_summary['trades']}\n"
+                f"- نسبة الربح: {port_summary['win_rate']:.1f}%\n"
+                f"- متوسط العائد: {port_summary['avg_return']:.2f}%\n"
+                f"- أكبر ربح: {port_summary['max_gain']:.2f}%\n"
+                f"- أكبر خسارة: {port_summary['max_loss']:.2f}%\n"
+                f"- العائد التراكمي: {port_summary['cum_return']:.2f}%"
+            )
 
         st.success("تم الانتهاء.")
