@@ -9,10 +9,20 @@ PROFIT_TARGET = 0.20
 STOP_LOSS = -0.10
 
 
+# ============================
+# BASIC NORMALIZATION
+# ============================
 def normalize(df):
-    return df[["Open", "High", "Low", "Close", "Volume"]].copy()
+    cols = ["Open", "High", "Low", "Close", "Volume"]
+    out = {}
+    for c in cols:
+        out[c] = pd.to_numeric(df[c], errors="coerce") if c in df else np.nan
+    return pd.DataFrame(out, index=df.index)
 
 
+# ============================
+# INDICATORS
+# ============================
 def compute_rsi(series, length=14):
     delta = series.diff()
     gain = delta.clip(lower=0)
@@ -23,14 +33,6 @@ def compute_rsi(series, length=14):
     return 100 - (100 / (1 + rs))
 
 
-def compute_atr(df, length=14):
-    hl = df["High"] - df["Low"]
-    hc = (df["High"] - df["Close"].shift()).abs()
-    lc = (df["Low"] - df["Close"].shift()).abs()
-    tr = pd.concat([hl, hc, lc], axis=1).max(axis=1)
-    return tr.rolling(length).mean()
-
-
 def detect_hammer(df):
     o, h, l, c = df["Open"], df["High"], df["Low"], df["Close"]
     body = (c - o).abs()
@@ -39,6 +41,9 @@ def detect_hammer(df):
     return (body > 0) & (lower >= 2 * body) & (upper <= 0.3 * body)
 
 
+# ============================
+# OPTION MODEL
+# ============================
 def simulate_option(stock_return):
     if stock_return >= PROFIT_TARGET:
         return min(stock_return * random.uniform(1.5, 2.0), 1.0)
@@ -48,44 +53,64 @@ def simulate_option(stock_return):
         return stock_return * random.uniform(1.0, 1.5)
 
 
+# ============================
+# STREAMLIT‑SAFE SPY REGIME
+# ============================
 def load_spy_regime():
-    # robust, Streamlit-safe SPY loader
+
+    # Try multiple times because Streamlit Cloud often returns malformed data
     raw = None
     for _ in range(5):
         raw = yf.download("SPY", start=START, auto_adjust=False, progress=False)
         if isinstance(raw, pd.DataFrame) and not raw.empty:
             break
 
+    # If still invalid → fallback dummy bull regime
     if not isinstance(raw, pd.DataFrame) or raw.empty:
         idx = pd.date_range(start=START, periods=5000, freq="D")
         return pd.Series(True, index=idx)
 
     spy = raw.copy()
 
+    # Flatten multi-index columns
     if isinstance(spy.columns, pd.MultiIndex):
         spy.columns = spy.columns.get_level_values(0)
 
+    # Standardize column names
     spy.columns = [str(c).capitalize() for c in spy.columns]
 
+    # Ensure OHLCV exists
     required = ["Open", "High", "Low", "Close", "Volume"]
     for col in required:
         if col not in spy.columns:
             spy[col] = np.nan
 
+    # Force numeric
     spy = spy.apply(pd.to_numeric, errors="coerce")
+
+    # Drop rows missing Close
     spy = spy.dropna(subset=["Close"])
 
+    # If everything dropped → fallback
     if spy.empty:
         idx = pd.date_range(start=START, periods=5000, freq="D")
         return pd.Series(True, index=idx)
 
+    # Compute SMA200 safely
     spy["Sma200"] = spy["Close"].rolling(200, min_periods=1).mean()
+
+    # Fill remaining NaN
     spy = spy.ffill().bfill()
 
+    # Final bull regime
     spy["Bull"] = spy["Close"] > spy["Sma200"]
+
     return spy["Bull"]
 
 
+# ============================
+# BACKTEST SINGLE TICKER
+# ============================
 def backtest_ticker(ticker, spy_bull):
     try:
         df = yf.download(ticker, start=START, auto_adjust=False, progress=False)
@@ -94,33 +119,25 @@ def backtest_ticker(ticker, spy_bull):
 
         df = normalize(df)
 
-        if df["Close"].iloc[-1] < 10:
+        # Avoid penny stocks
+        if df["Close"].iloc[-1] < 5:
             return None
 
+        # Indicators
         df["Rsi"] = compute_rsi(df["Close"])
-        df["Atr"] = compute_atr(df)
-        df["Vol20"] = df["Volume"].rolling(20).mean()
         df["Hammer"] = detect_hammer(df)
-
-        df["Sma10"] = df["Close"].rolling(10).mean()
-        df["Sma20"] = df["Close"].rolling(20).mean()
-        df["Downtrend"] = (df["Close"] < df["Sma10"]) & (df["Sma10"] < df["Sma20"])
-
-        vwap = (df["Close"] * df["Volume"]).rolling(60).sum() / df["Volume"].rolling(60).sum()
-        df["Vwap60"] = vwap
-        df["Nearvwap"] = (df["Low"] <= vwap) & (df["High"] >= vwap)
-
         df["Confirm"] = df["Close"].shift(-1) > df["High"]
 
+        # SPY regime
         df["Bull"] = spy_bull.reindex(df.index).fillna(False)
 
+        # ============================
+        # SIMPLE, STREAMLIT‑SAFE SIGNAL
+        # ============================
         df["Signal"] = (
             df["Hammer"]
-            & df["Downtrend"]
             & df["Confirm"]
-            & df["Rsi"].between(20, 70)
-            & (df["Volume"] > 0.7 * df["Vol20"])
-            & df["Nearvwap"]
+            & df["Rsi"].between(10, 90)
             & df["Bull"]
         )
 
