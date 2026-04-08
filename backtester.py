@@ -9,16 +9,10 @@ PROFIT_TARGET = 0.20
 STOP_LOSS = -0.10
 
 
-# ============================
-# NORMALIZATION
-# ============================
 def normalize(df):
     return df[["Open", "High", "Low", "Close", "Volume"]].copy()
 
 
-# ============================
-# INDICATORS
-# ============================
 def compute_rsi(series, length=14):
     delta = series.diff()
     gain = delta.clip(lower=0)
@@ -45,9 +39,6 @@ def detect_hammer(df):
     return (body > 0) & (lower >= 2 * body) & (upper <= 0.3 * body)
 
 
-# ============================
-# OPTION MODEL
-# ============================
 def simulate_option(stock_return):
     if stock_return >= PROFIT_TARGET:
         return min(stock_return * random.uniform(1.5, 2.0), 1.0)
@@ -57,64 +48,44 @@ def simulate_option(stock_return):
         return stock_return * random.uniform(1.0, 1.5)
 
 
-# ============================
-# STREAMLIT‑SAFE SPY REGIME
-# ============================
 def load_spy_regime():
-
-    # Try multiple times because Streamlit Cloud often returns malformed data
+    # robust, Streamlit-safe SPY loader
     raw = None
     for _ in range(5):
         raw = yf.download("SPY", start=START, auto_adjust=False, progress=False)
         if isinstance(raw, pd.DataFrame) and not raw.empty:
             break
 
-    # If still invalid → fallback dummy bull regime
     if not isinstance(raw, pd.DataFrame) or raw.empty:
         idx = pd.date_range(start=START, periods=5000, freq="D")
         return pd.Series(True, index=idx)
 
     spy = raw.copy()
 
-    # --- FORCE DataFrame structure ---
     if isinstance(spy.columns, pd.MultiIndex):
         spy.columns = spy.columns.get_level_values(0)
 
-    # Standardize column names
     spy.columns = [str(c).capitalize() for c in spy.columns]
 
-    # Ensure OHLCV columns exist
     required = ["Open", "High", "Low", "Close", "Volume"]
     for col in required:
         if col not in spy.columns:
             spy[col] = np.nan
 
-    # Force numeric
     spy = spy.apply(pd.to_numeric, errors="coerce")
-
-    # Drop rows missing Close
     spy = spy.dropna(subset=["Close"])
 
-    # If everything dropped → fallback
     if spy.empty:
         idx = pd.date_range(start=START, periods=5000, freq="D")
         return pd.Series(True, index=idx)
 
-    # Compute SMA200 safely
     spy["Sma200"] = spy["Close"].rolling(200, min_periods=1).mean()
+    spy = spy.ffill().bfill()
 
-    # Fill remaining NaN
-    spy = spy.fillna(method="ffill").fillna(method="bfill")
-
-    # Final bull regime
     spy["Bull"] = spy["Close"] > spy["Sma200"]
-
     return spy["Bull"]
 
 
-# ============================
-# BACKTEST SINGLE TICKER
-# ============================
 def backtest_ticker(ticker, spy_bull):
     try:
         df = yf.download(ticker, start=START, auto_adjust=False, progress=False)
@@ -186,10 +157,10 @@ def backtest_ticker(ticker, spy_bull):
 
             trades.append({
                 "Ticker": ticker,
-                "Entrydate": entry_date,
-                "Exitdate": exit_loc,
-                "Stockreturn": stock_ret,
-                "Optionreturn": opt_ret
+                "EntryDate": entry_date,
+                "ExitDate": exit_loc,
+                "StockReturn": stock_ret,
+                "OptionReturn": opt_ret
             })
 
         return pd.DataFrame(trades) if trades else None

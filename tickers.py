@@ -1,5 +1,5 @@
 LIQUID_TICKERS = [
-    # S&P 100 (OEX) – all highly liquid & optionable
+    # S&P 100 – liquid, optionable
     "AAPL","MSFT","AMZN","GOOGL","META","NVDA","TSLA","BRK.B","JPM","V",
     "JNJ","WMT","PG","MA","HD","XOM","BAC","PFE","KO","DIS",
     "CSCO","PEP","CVX","ABT","TMO","AVGO","COST","MCD","ACN","DHR",
@@ -10,7 +10,7 @@ LIQUID_TICKERS = [
     "TGT","ZTS","CI","SCHW","PLD","CME","SO","DUK","USB","PNC",
     "CL","BDX","APD","ICE","FDX","GM","F","BA","NFLX","CRM",
 
-    # Extra liquid tech / growth
+    # Extra liquid names
     "AMD","INTU","ADSK","REGN","MU","CSX","MAR","LRCX",
 
     # Index ETFs

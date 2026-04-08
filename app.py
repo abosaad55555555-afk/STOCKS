@@ -6,8 +6,6 @@ from backtester import backtest_ticker, load_spy_regime
 st.title("Hammer Pattern Options Backtester")
 st.write("Fast, stable, Streamlit‑optimized version.")
 
-spy_bull = None   # IMPORTANT: do NOT load SPY at import time
-
 if st.button("Run Backtest"):
 
     with st.spinner("Loading SPY regime..."):
@@ -32,8 +30,8 @@ if st.button("Run Backtest"):
         st.dataframe(trades.head())
 
         st.write("### Summary")
-        st.write("Win rate:", float((trades['OptionReturn'] > 0).mean()))
-        st.write("Avg option return:", float(trades['OptionReturn'].mean()))
+        st.write("Win rate:", float((trades["OptionReturn"] > 0).mean()))
+        st.write("Avg option return:", float(trades["OptionReturn"].mean()))
 
         csv = trades.to_csv(index=False)
         st.download_button(
