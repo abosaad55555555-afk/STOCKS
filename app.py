@@ -4,11 +4,11 @@ from tickers import LIQUID_TICKERS
 from backtester import backtest_ticker, load_spy_regime
 
 st.title("Hammer Pattern Options Backtester")
-st.write("Fast, stable, Streamlit‑optimized version.")
+st.write("Ultra‑simple, Streamlit‑safe version to GUARANTEE trades.")
 
 if st.button("Run Backtest"):
 
-    with st.spinner("Loading SPY regime..."):
+    with st.spinner("Loading SPY regime (not used in signal yet)..."):
         spy_bull = load_spy_regime()
 
     all_trades = []
@@ -16,18 +16,18 @@ if st.button("Run Backtest"):
 
     for i, t in enumerate(LIQUID_TICKERS):
         df = backtest_ticker(t, spy_bull)
-        if df is not None:
+        if df is not None and not df.empty:
             all_trades.append(df)
         progress.progress((i + 1) / len(LIQUID_TICKERS))
 
     if not all_trades:
-        st.error("No trades generated.")
+        st.error("No trades generated. (With this setup, that would be VERY surprising.)")
     else:
         trades = pd.concat(all_trades, ignore_index=True)
         st.success(f"Trades generated: {len(trades)}")
 
         st.write("### Sample trades")
-        st.dataframe(trades.head())
+        st.dataframe(trades.head(50))
 
         st.write("### Summary")
         st.write("Win rate:", float((trades["OptionReturn"] > 0).mean()))
