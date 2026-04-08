@@ -61,27 +61,29 @@ def simulate_option(stock_return):
 # STREAMLIT‑SAFE SPY REGIME
 # ============================
 def load_spy_regime():
-    spy = pd.DataFrame()
 
-    # Retry download (Streamlit Cloud sometimes returns empty)
+    # Try multiple times because Streamlit Cloud often returns malformed data
+    raw = None
     for _ in range(5):
-        spy = yf.download("SPY", start=START, auto_adjust=False, progress=False)
-        if not spy.empty:
+        raw = yf.download("SPY", start=START, auto_adjust=False, progress=False)
+        if isinstance(raw, pd.DataFrame) and not raw.empty:
             break
 
-    # If still empty → fallback dummy bull regime
-    if spy.empty:
+    # If still invalid → fallback dummy bull regime
+    if not isinstance(raw, pd.DataFrame) or raw.empty:
         idx = pd.date_range(start=START, periods=5000, freq="D")
         return pd.Series(True, index=idx)
 
-    # Flatten multi-index columns
+    spy = raw.copy()
+
+    # --- FORCE DataFrame structure ---
     if isinstance(spy.columns, pd.MultiIndex):
         spy.columns = spy.columns.get_level_values(0)
 
     # Standardize column names
-    spy.columns = [c.capitalize() for c in spy.columns]
+    spy.columns = [str(c).capitalize() for c in spy.columns]
 
-    # Ensure OHLCV exists
+    # Ensure OHLCV columns exist
     required = ["Open", "High", "Low", "Close", "Volume"]
     for col in required:
         if col not in spy.columns:
@@ -99,13 +101,13 @@ def load_spy_regime():
         return pd.Series(True, index=idx)
 
     # Compute SMA200 safely
-    spy["SMA200"] = spy["Close"].rolling(200, min_periods=1).mean()
+    spy["Sma200"] = spy["Close"].rolling(200, min_periods=1).mean()
 
     # Fill remaining NaN
     spy = spy.fillna(method="ffill").fillna(method="bfill")
 
     # Final bull regime
-    spy["Bull"] = spy["Close"] > spy["SMA200"]
+    spy["Bull"] = spy["Close"] > spy["Sma200"]
 
     return spy["Bull"]
 
@@ -121,22 +123,21 @@ def backtest_ticker(ticker, spy_bull):
 
         df = normalize(df)
 
-        # Avoid penny stocks
         if df["Close"].iloc[-1] < 10:
             return None
 
-        df["RSI"] = compute_rsi(df["Close"])
-        df["ATR"] = compute_atr(df)
+        df["Rsi"] = compute_rsi(df["Close"])
+        df["Atr"] = compute_atr(df)
         df["Vol20"] = df["Volume"].rolling(20).mean()
         df["Hammer"] = detect_hammer(df)
 
-        df["SMA10"] = df["Close"].rolling(10).mean()
-        df["SMA20"] = df["Close"].rolling(20).mean()
-        df["Downtrend"] = (df["Close"] < df["SMA10"]) & (df["SMA10"] < df["SMA20"])
+        df["Sma10"] = df["Close"].rolling(10).mean()
+        df["Sma20"] = df["Close"].rolling(20).mean()
+        df["Downtrend"] = (df["Close"] < df["Sma10"]) & (df["Sma10"] < df["Sma20"])
 
         vwap = (df["Close"] * df["Volume"]).rolling(60).sum() / df["Volume"].rolling(60).sum()
-        df["VWAP60"] = vwap
-        df["NearVWAP"] = (df["Low"] <= vwap) & (df["High"] >= vwap)
+        df["Vwap60"] = vwap
+        df["Nearvwap"] = (df["Low"] <= vwap) & (df["High"] >= vwap)
 
         df["Confirm"] = df["Close"].shift(-1) > df["High"]
 
@@ -146,9 +147,9 @@ def backtest_ticker(ticker, spy_bull):
             df["Hammer"]
             & df["Downtrend"]
             & df["Confirm"]
-            & df["RSI"].between(20, 70)
+            & df["Rsi"].between(20, 70)
             & (df["Volume"] > 0.7 * df["Vol20"])
-            & df["NearVWAP"]
+            & df["Nearvwap"]
             & df["Bull"]
         )
 
@@ -185,10 +186,10 @@ def backtest_ticker(ticker, spy_bull):
 
             trades.append({
                 "Ticker": ticker,
-                "EntryDate": entry_date,
-                "ExitDate": exit_loc,
-                "StockReturn": stock_ret,
-                "OptionReturn": opt_ret
+                "Entrydate": entry_date,
+                "Exitdate": exit_loc,
+                "Stockreturn": stock_ret,
+                "Optionreturn": opt_ret
             })
 
         return pd.DataFrame(trades) if trades else None
