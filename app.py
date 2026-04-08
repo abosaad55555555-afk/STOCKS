@@ -5,7 +5,9 @@ import numpy as np
 
 # ----------------- إعدادات عامة -----------------
 START = "2010-01-01"
-
+MAX_HOLD_DAYS = 5
+PROFIT_TARGET = 0.20   # +20%
+STOP_LOSS = -0.10      # -10%
 
 LIQUID_TICKERS = [
     "AAPL", "MSFT", "AMZN", "GOOGL", "GOOG",
@@ -15,25 +17,18 @@ LIQUID_TICKERS = [
 
 # ----------------- دوال المساعدة -----------------
 def normalize(df):
-    """
-    نضمن أن الأعمدة Open, High, Low, Close, Volume
-    كلها موجودة وبشكل Series بنفس index.
-    """
     cols = ["Open", "High", "Low", "Close", "Volume"]
     out = {}
 
-    # لو الأعمدة جاية من ياهو بمستوى MultiIndex مثل ('Open', 'Adj Close') نسطحها
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
 
-    # توحيد أسماء الأعمدة
     df.columns = [str(c).capitalize() for c in df.columns]
 
     for c in cols:
         if c in df:
             out[c] = pd.to_numeric(df[c], errors="coerce")
         else:
-            # لازم Series بنفس الطول، مو float
             out[c] = pd.Series(np.nan, index=df.index)
 
     out_df = pd.DataFrame(out, index=df.index)
@@ -77,7 +72,6 @@ def load_spy_regime():
         idx = pd.date_range(start=START, periods=5000, freq="D")
         return pd.Series(False, index=idx)
 
-    # تسطيح MultiIndex إن وجد
     if isinstance(raw.columns, pd.MultiIndex):
         raw.columns = raw.columns.get_level_values(0)
 
@@ -102,35 +96,173 @@ def load_spy_regime():
     return raw["Bull"]
 
 
+# ----------------- باك تست: إشارات + صفقات -----------------
+def build_signals(df, spy_bull):
+    df["Hammer"] = detect_hammer(df)
+    df["Rsi"] = compute_rsi(df["Close"])
+    df["Sma10"] = df["Close"].rolling(10, min_periods=1).mean()
+    df["Sma20"] = df["Close"].rolling(20, min_periods=1).mean()
+    df["Downtrend"] = (df["Close"] < df["Sma10"]) & (df["Sma10"] < df["Sma20"])
+    df["Vol20"] = df["Volume"].rolling(20, min_periods=1).mean()
+
+    vwap_num = (df["Close"] * df["Volume"]).rolling(60, min_periods=1).sum()
+    vwap_den = df["Volume"].rolling(60, min_periods=1).sum()
+    vwap = vwap_num / (vwap_den + 1e-9)
+    df["Nearvwap"] = (df["Low"] <= vwap) & (df["High"] >= vwap)
+
+    df["Confirm"] = df["Close"].shift(-1) > df["High"]
+    df["Bull"] = spy_bull.reindex(df.index).fillna(False)
+
+    df["Signal"] = (
+        df["Hammer"]
+        & df["Downtrend"]
+        & df["Confirm"]
+        & df["Rsi"].between(20, 70)
+        & (df["Volume"] > 0.7 * df["Vol20"])
+        & df["Nearvwap"]
+        & df["Bull"]
+    )
+
+    return df
+
+
+def simulate_trades(df):
+    """
+    دخول: اليوم التالي بعد إشارة Signal عند الافتتاح.
+    خروج: هدف ربح +20% أو وقف -10% أو بعد MAX_HOLD_DAYS.
+    """
+    trades = []
+    signal_dates = df.index[df["Signal"]].tolist()
+
+    for sig_date in signal_dates:
+        # يوم الدخول = اليوم التالي
+        if sig_date not in df.index:
+            continue
+        pos = df.index.get_loc(sig_date)
+        if pos + 1 >= len(df):
+            continue
+
+        entry_date = df.index[pos + 1]
+        entry_open = df.loc[entry_date, "Open"]
+        if pd.isna(entry_open) or entry_open <= 0:
+            continue
+
+        target_price = entry_open * (1 + PROFIT_TARGET)
+        stop_price = entry_open * (1 + STOP_LOSS)
+
+        exit_date = None
+        exit_price = None
+        exit_reason = None
+
+        for hold_day in range(MAX_HOLD_DAYS):
+            idx = pos + 1 + hold_day
+            if idx >= len(df):
+                break
+
+            day = df.index[idx]
+            high = df.loc[day, "High"]
+            low = df.loc[day, "Low"]
+            close = df.loc[day, "Close"]
+
+            if pd.isna(high) or pd.isna(low) or pd.isna(close):
+                continue
+
+            # تحقق الهدف أولاً
+            if high >= target_price:
+                exit_date = day
+                exit_price = target_price
+                exit_reason = "TP"
+                break
+
+            # تحقق الوقف
+            if low <= stop_price:
+                exit_date = day
+                exit_price = stop_price
+                exit_reason = "SL"
+                break
+
+            # آخر يوم احتفاظ
+            if hold_day == MAX_HOLD_DAYS - 1:
+                exit_date = day
+                exit_price = close
+                exit_reason = "TIME"
+                break
+
+        if exit_date is None or exit_price is None:
+            continue
+
+        ret = (exit_price - entry_open) / entry_open
+
+        trades.append(
+            {
+                "entry_date": entry_date,
+                "entry_price": entry_open,
+                "exit_date": exit_date,
+                "exit_price": exit_price,
+                "exit_reason": exit_reason,
+                "return_pct": ret * 100.0,
+            }
+        )
+
+    if not trades:
+        return pd.DataFrame(columns=["entry_date", "entry_price", "exit_date", "exit_price", "exit_reason", "return_pct"])
+
+    trades_df = pd.DataFrame(trades)
+    trades_df.sort_values("entry_date", inplace=True)
+    trades_df.reset_index(drop=True, inplace=True)
+    return trades_df
+
+
+def summarize_trades(trades_df):
+    if trades_df.empty:
+        return {
+            "trades": 0,
+            "win_rate": 0.0,
+            "avg_return": 0.0,
+            "max_gain": 0.0,
+            "max_loss": 0.0,
+            "cum_return": 0.0,
+        }
+
+    n = len(trades_df)
+    wins = (trades_df["return_pct"] > 0).sum()
+    win_rate = wins / n * 100.0
+    avg_return = trades_df["return_pct"].mean()
+    max_gain = trades_df["return_pct"].max()
+    max_loss = trades_df["return_pct"].min()
+    cum_return = (1 + trades_df["return_pct"] / 100.0).prod() - 1
+
+    return {
+        "trades": n,
+        "win_rate": win_rate,
+        "avg_return": avg_return,
+        "max_gain": max_gain,
+        "max_loss": max_loss,
+        "cum_return": cum_return * 100.0,
+    }
+
+
 def backtest_ticker(ticker, spy_bull):
     try:
         df_raw = yf.download(ticker, start=START, auto_adjust=False, progress=False)
         if df_raw is None or df_raw.empty:
-            return f"{ticker}: DATA EMPTY"
+            return {
+                "log": f"{ticker}: DATA EMPTY",
+                "summary": None,
+                "trades": pd.DataFrame(),
+            }
 
         df = normalize(df_raw)
 
-        # فحوصات أساسية
         if df["Close"].isna().all():
-            return f"{ticker}: ERROR – Close prices all NaN"
+            return {
+                "log": f"{ticker}: ERROR – Close prices all NaN",
+                "summary": None,
+                "trades": pd.DataFrame(),
+            }
 
-        # حساب المؤشرات
-        df["Hammer"] = detect_hammer(df)
-        df["Rsi"] = compute_rsi(df["Close"])
-        df["Sma10"] = df["Close"].rolling(10, min_periods=1).mean()
-        df["Sma20"] = df["Close"].rolling(20, min_periods=1).mean()
-        df["Downtrend"] = (df["Close"] < df["Sma10"]) & (df["Sma10"] < df["Sma20"])
-        df["Vol20"] = df["Volume"].rolling(20, min_periods=1).mean()
+        df = build_signals(df, spy_bull)
 
-        vwap_num = (df["Close"] * df["Volume"]).rolling(60, min_periods=1).sum()
-        vwap_den = df["Volume"].rolling(60, min_periods=1).sum()
-        vwap = vwap_num / (vwap_den + 1e-9)
-        df["Nearvwap"] = (df["Low"] <= vwap) & (df["High"] >= vwap)
-
-        df["Confirm"] = df["Close"].shift(-1) > df["High"]
-        df["Bull"] = spy_bull.reindex(df.index).fillna(False)
-
-        # لوج تشخيصي
         log = (
             f"{ticker}:\n"
             f"  rows: {len(df)}\n"
@@ -141,32 +273,31 @@ def backtest_ticker(ticker, spy_bull):
             f"  vol filter: {(df['Volume'] > 0.7 * df['Vol20']).sum()}\n"
             f"  near vwap: {df['Nearvwap'].sum()}\n"
             f"  bull: {df['Bull'].sum()}\n"
+            f"  FINAL SIGNALS: {df['Signal'].sum()}\n"
         )
 
-        df["Signal"] = (
-            df["Hammer"]
-            & df["Downtrend"]
-            & df["Confirm"]
-            & df["Rsi"].between(20, 70)
-            & (df["Volume"] > 0.7 * df["Vol20"])
-            & df["Nearvwap"]
-            & df["Bull"]
-        )
+        trades_df = simulate_trades(df)
+        summary = summarize_trades(trades_df)
 
-        log += f"  FINAL SIGNALS: {df['Signal'].sum()}\n"
-
-        return log
+        return {
+            "log": log,
+            "summary": summary,
+            "trades": trades_df,
+        }
 
     except Exception as e:
-        # نرجع نص الخطأ كما هو عشان لو فيه شيء ثاني
-        return f"{ticker}: ERROR {e}"
+        return {
+            "log": f"{ticker}: ERROR {e}",
+            "summary": None,
+            "trades": pd.DataFrame(),
+        }
 
 
 # ----------------- واجهة Streamlit -----------------
 st.set_page_config(page_title="Hammer Backtest – Diagnostics", layout="wide")
 
-st.title("Hammer Backtest – التشخيص الكامل")
-st.write("يعرض هذا النظام نتائج الباك تست بالتفصيل لكل سهم تقوم باختياره من القائمة.")
+st.title("Hammer Backtest – التشخيص الكامل مع الصفقات")
+st.write("يعرض هذا النظام إشارات الهامر، ثم يحولها إلى صفقات فعلية مع هدف ربح ووقف خسارة ومدة احتفاظ محددة.")
 
 with st.spinner("جاري تحميل بيانات SPY..."):
     spy_regime = load_spy_regime()
@@ -188,12 +319,32 @@ if run_button:
 
         for ticker in selected_tickers:
             st.write("---")
-            st.subheader(f"🔍 {ticker} – Full Diagnostics")
+            st.subheader(f"🔍 {ticker} – Full Diagnostics & Trades")
 
             with st.spinner(f"جاري تشغيل الباك تست لـ {ticker}..."):
                 result = backtest_ticker(ticker, spy_regime)
 
-            st.write("#### Raw Output (Text)")
-            st.code(str(result))
+            st.write("#### Raw Diagnostics")
+            st.code(str(result["log"]))
+
+            summary = result["summary"]
+            trades_df = result["trades"]
+
+            if summary is not None:
+                st.write("#### Summary")
+                st.write(
+                    f"- عدد الصفقات: {summary['trades']}\n"
+                    f"- نسبة الربح: {summary['win_rate']:.1f}%\n"
+                    f"- متوسط العائد لكل صفقة: {summary['avg_return']:.2f}%\n"
+                    f"- أكبر ربح: {summary['max_gain']:.2f}%\n"
+                    f"- أكبر خسارة: {summary['max_loss']:.2f}%\n"
+                    f"- العائد التراكمي: {summary['cum_return']:.2f}%"
+                )
+
+            if not trades_df.empty:
+                st.write("#### قائمة الصفقات")
+                st.dataframe(trades_df)
+            else:
+                st.info("لا توجد صفقات ناتجة عن هذه الإشارات.")
 
         st.success("تم الانتهاء من جميع الاختبارات.")
