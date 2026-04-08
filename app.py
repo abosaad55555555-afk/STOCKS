@@ -1,12 +1,11 @@
-import streamlit as st
+import streamlit as stimport streamlit as st
 from tickers import LIQUID_TICKERS
 from backtester import backtest_ticker, load_spy_regime
-import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="Hammer Backtest â€“ Diagnostics", layout="wide")
+st.set_page_config(page_title="Hammer Backtest – Diagnostics", layout="wide")
 
-st.title("Hammer Backtest â€“ Full Diagnostics")
-st.write("ÙŠØ¹Ø±Ø¶ Ù„ÙˆØ¬ ÙƒØ§Ù…Ù„ Ù„ÙƒÙ„ Ø³Ù‡Ù…: Ù‡Ù†Ø§ ÙŠÙ…ÙƒÙ†Ùƒ Ø±Ø¤ÙŠØ© Ù†ØªØ§Ø¦Ø¬ Ø§Ù„Ø¨Ø§Ùƒ ØªØ³Øª Ø¨Ø§Ù„ØªÙØµÙŠÙ„ Ù„ÙƒÙ„ Ø³Ù‡Ù… ÙÙŠ Ø§Ù„Ù‚Ø§Ø¦Ù…Ø©.")
+st.title("Hammer Backtest – Full Diagnostics")
+st.write("íÚÑÖ áæÌ ßÇãá áßá Óåã: åäÇ íãßäß ÑÄíÉ äÊÇÆÌ ÇáÈÇß ÊÓÊ ÈÇáÊİÕíá áßá Óåã İí ÇáŞÇÆãÉ.")
 
 # Load SPY regime
 with st.spinner("Loading SPY regime..."):
@@ -15,22 +14,22 @@ st.success("SPY regime loaded successfully.")
 
 # Select tickers
 selected_tickers = st.multiselect(
-    "Ø§Ø®ØªØ± Ø§Ù„Ø£Ø³Ù‡Ù… Ø§Ù„ØªÙŠ ØªØ±ÙŠØ¯ Ø§Ø®ØªØ¨Ø§Ø±Ù‡Ø§:",
+    "ÇÎÊÑ ÇáÃÓåã ÇáÊí ÊÑíÏ ÇÎÊÈÇÑåÇ:",
     LIQUID_TICKERS,
     default=LIQUID_TICKERS[:10]
 )
 
-run_button = st.button("Ø§Ø¨Ø¯Ø£ Ø§Ù„Ø¨Ø§Ùƒ ØªØ³Øª")
+run_button = st.button("ÇÈÏÃ ÇáÈÇß ÊÓÊ")
 
 if run_button:
     if not selected_tickers:
-        st.warning("Ø§Ù„Ø±Ø¬Ø§Ø¡ Ø§Ø®ØªÙŠØ§Ø± Ø³Ù‡Ù… ÙˆØ§Ø­Ø¯ Ø¹Ù„Ù‰ Ø§Ù„Ø£Ù‚Ù„.")
+        st.warning("ÇáÑÌÇÁ ÇÎÊíÇÑ Óåã æÇÍÏ Úáì ÇáÃŞá.")
     else:
-        st.write("### Ø§Ù„Ù†ØªØ§Ø¦Ø¬ Ø§Ù„ÙƒØ§Ù…Ù„Ø© Ù„ÙƒÙ„ Ø³Ù‡Ù…")
+        st.write("### ÇáäÊÇÆÌ ÇáßÇãáÉ áßá Óåã")
 
         for ticker in selected_tickers:
             st.write("---")
-            st.subheader(f"ğŸ” {ticker} â€“ Full Diagnostics")
+            st.subheader(f"?? {ticker} – Full Diagnostics")
 
             with st.spinner(f"Running backtest for {ticker}..."):
                 try:
@@ -39,37 +38,14 @@ if run_button:
                     st.error(f"Error while backtesting {ticker}: {e}")
                     continue
 
-            # Show raw result structure
-            st.write("#### Raw Output (Structure)")
-            st.json(result)
+            # ALWAYS show raw output as text
+            st.write("#### Raw Output (Text)")
+            st.code(str(result))
 
-            # Try to show logs if exist
+            # If result is dict, show details
             if isinstance(result, dict):
                 for key, value in result.items():
+                    with st.expander(f"{key}"):
+                        st.write(value)
 
-                    # Show text logs
-                    if isinstance(value, str):
-                        with st.expander(f"ğŸ“„ {key} (text)"):
-                            st.text(value)
-
-                    # Show numeric tables
-                    elif isinstance(value, (list, tuple)):
-                        with st.expander(f"ğŸ“Š {key} (list)"):
-                            st.write(value)
-
-                    # Show nested dicts
-                    elif isinstance(value, dict):
-                        with st.expander(f"ğŸ“ {key} (dictionary)"):
-                            st.json(value)
-
-                    # Show plots if matplotlib figure
-                    elif "Figure" in str(type(value)):
-                        st.write(f"ğŸ“ˆ {key} (plot)")
-                        st.pyplot(value)
-
-                    # Fallback for unknown types
-                    else:
-                        with st.expander(f"ğŸ”§ {key} (other type)"):
-                            st.write(value)
-
-        st.success("ØªÙ… Ø§Ù„Ø§Ù†ØªÙ‡Ø§Ø¡ Ù…Ù† Ø¬Ù…ÙŠØ¹ Ø§Ù„Ø§Ø®ØªØ¨Ø§Ø±Ø§Øª.")
+        st.success("Êã ÇáÇäÊåÇÁ ãä ÌãíÚ ÇáÇÎÊÈÇÑÇÊ.")
