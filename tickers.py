@@ -10,9 +10,9 @@ LIQUID_TICKERS = [
     "TGT","ZTS","CI","SCHW","PLD","CME","SO","DUK","USB","PNC",
     "CL","BDX","APD","ICE","FDX","GM","F","BA","NFLX","CRM",
 
-    # Add QQQ top names
-    "AMD","INTU","AMAT","ADSK","REGN","MU","CSX","MAR","BKNG","LRCX",
+    # Extra liquid tech / growth
+    "AMD","INTU","ADSK","REGN","MU","CSX","MAR","LRCX",
 
-    # Add IWM top liquid names
-    "IWM","QQQ","SPY"
+    # Index ETFs
+    "SPY","QQQ","IWM"
 ]
