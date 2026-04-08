@@ -3,12 +3,12 @@ import pandas as pd
 from tickers import LIQUID_TICKERS
 from backtester import backtest_ticker, load_spy_regime
 
-st.title("Hammer Pattern Options Backtester")
-st.write("Ultra‑simple, Streamlit‑safe version to GUARANTEE trades.")
+st.title("Minimal Backtester – Sanity Check")
+st.write("هذا الإصدار هدفه الوحيد: التأكد إن في بيانات وإن في صفقات فعلاً.")
 
 if st.button("Run Backtest"):
 
-    with st.spinner("Loading SPY regime (not used in signal yet)..."):
+    with st.spinner("Loading SPY regime (not used in signal logic)..."):
         spy_bull = load_spy_regime()
 
     all_trades = []
@@ -21,7 +21,7 @@ if st.button("Run Backtest"):
         progress.progress((i + 1) / len(LIQUID_TICKERS))
 
     if not all_trades:
-        st.error("No trades generated. (With this setup, that would be VERY surprising.)")
+        st.error("No trades generated. هذا يعني غالباً أن بيانات yfinance فاضية أو فيها مشكلة شبكة.")
     else:
         trades = pd.concat(all_trades, ignore_index=True)
         st.success(f"Trades generated: {len(trades)}")
@@ -37,6 +37,6 @@ if st.button("Run Backtest"):
         st.download_button(
             "Download trades CSV",
             csv,
-            "hammer_trades.csv",
+            "hammer_trades_sanity.csv",
             "text/csv"
         )

@@ -17,45 +17,8 @@ def normalize(df):
     return pd.DataFrame(out, index=df.index)
 
 
-def compute_rsi(series, length=14):
-    delta = series.diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    avg_gain = gain.rolling(length).mean()
-    avg_loss = loss.rolling(length).mean()
-    rs = avg_gain / (avg_loss + 1e-9)
-    return 100 - (100 / (1 + rs))
-
-
-def detect_hammer(df):
-    o = df["Open"]
-    c = df["Close"]
-    h = df["High"]
-    l = df["Low"]
-
-    body = (c - o).abs()
-    candle_range = h - l
-    lower_shadow = (o.where(o < c, c) - l)
-    upper_shadow = (h - o.where(o > c, c))
-
-    return (
-        (candle_range > 0) &
-        (body <= candle_range * 0.4) &         # small body
-        (lower_shadow >= candle_range * 0.4) & # long lower wick
-        (upper_shadow <= candle_range * 0.2)   # tiny upper wick
-    )
-
-
-def simulate_option(stock_return):
-    if stock_return >= PROFIT_TARGET:
-        return min(stock_return * random.uniform(1.5, 2.0), 1.0)
-    elif stock_return <= STOP_LOSS:
-        return max(stock_return * random.uniform(1.5, 2.5), -0.9)
-    else:
-        return stock_return * random.uniform(1.0, 1.5)
-
-
 def load_spy_regime():
+    # نخلّيها موجودة لو حبيت تستخدمها لاحقاً، لكنها غير مؤثرة الآن
     raw = None
     for _ in range(5):
         raw = yf.download("SPY", start=START, auto_adjust=False, progress=False)
@@ -92,23 +55,38 @@ def load_spy_regime():
     return spy["Bull"]
 
 
+def simulate_option(stock_return):
+    if stock_return >= PROFIT_TARGET:
+        return min(stock_return * random.uniform(1.5, 2.0), 1.0)
+    elif stock_return <= STOP_LOSS:
+        return max(stock_return * random.uniform(1.5, 2.5), -0.9)
+    else:
+        return stock_return * random.uniform(1.0, 1.5)
+
+
 def backtest_ticker(ticker, spy_bull):
     try:
         df = yf.download(ticker, start=START, auto_adjust=False, progress=False)
         if df.empty:
+            print(f"{ticker}: EMPTY from yfinance")
             return None
 
         df = normalize(df)
 
-        # very loose price floor
-        if df["Close"].iloc[-1] < 1:
+        # لو كل الأعمدة NaN → نعتبره فاضي
+        if df["Close"].isna().all():
+            print(f"{ticker}: all NaN after normalize")
             return None
 
-        df["Rsi"] = compute_rsi(df["Close"])
-        df["Hammer"] = detect_hammer(df)
+        # DEBUG: اطبع أول كم سطر في اللوق
+        print(f"{ticker} head:\n", df.head())
 
-        # SIMPLE SIGNAL: hammer only (to guarantee trades)
-        df["Signal"] = df["Hammer"]
+        # أبسط إشارة ممكنة: كل يوم (ما عدا آخر MAX_HOLD_DAYS) هو إشارة
+        df["Signal"] = False
+        if len(df) > MAX_HOLD_DAYS + 1:
+            df.iloc[:-MAX_HOLD_DAYS, df.columns.get_loc("Signal")] = True
+        else:
+            df["Signal"] = True  # لو السهم قصير التاريخ، خله كله إشارات
 
         trades = []
         sig_idx = np.where(df["Signal"])[0]
@@ -149,7 +127,12 @@ def backtest_ticker(ticker, spy_bull):
                 "OptionReturn": opt_ret
             })
 
-        return pd.DataFrame(trades) if trades else None
+        if not trades:
+            print(f"{ticker}: no trades even with trivial signal")
+            return None
 
-    except Exception:
+        return pd.DataFrame(trades)
+
+    except Exception as e:
+        print(f"ERROR {ticker}: {e}")
         return None
