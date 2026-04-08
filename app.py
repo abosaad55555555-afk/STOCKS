@@ -97,11 +97,6 @@ def build_signals(df, spy_bull):
     df["Downtrend"] = (df["Close"] < df["Sma10"]) & (df["Sma10"] < df["Sma20"])
     df["Vol20"] = df["Volume"].rolling(20, min_periods=1).mean()
 
-    vwap_num = (df["Close"] * df["Volume"]).rolling(60, min_periods=1).sum()
-    vwap_den = df["Volume"].rolling(60, min_periods=1).sum()
-    vwap = vwap_num / (vwap_den + 1e-9)
-    df["Nearvwap"] = (df["Low"] <= vwap) & (df["High"] >= vwap)
-
     df["Confirm"] = df["Close"].shift(-1) > df["High"]
     df["Bull"] = spy_bull.reindex(df.index).fillna(False)
 
@@ -111,14 +106,13 @@ def build_signals(df, spy_bull):
         & df["Confirm"]
         & df["Rsi"].between(20, 70)
         & (df["Volume"] > 0.7 * df["Vol20"])
-        & df["Nearvwap"]
         & df["Bull"]
     )
 
     return df
 
 
-# ----------------- صفقات: دخول next open خروج same close -----------------
+# ----------------- صفقات: دخول Next Open خروج Same Close -----------------
 def simulate_trades(df):
     trades = []
     signal_dates = df.index[df["Signal"]].tolist()
@@ -219,7 +213,7 @@ def backtest_ticker(ticker, spy_bull):
 st.set_page_config(page_title="Hammer Backtest – Intraday", layout="wide")
 
 st.title("Hammer Backtest – دخول Next Open وخروج Same Close")
-st.write("هذا النموذج يحول إشارات الهامر إلى صفقات يومية: شراء عند افتتاح اليوم التالي وبيع عند إغلاق نفس اليوم.")
+st.write("هذا النموذج يحول إشارات الهامر إلى صفقات يومية بدون VWAP.")
 
 with st.spinner("جاري تحميل بيانات SPY..."):
     spy_regime = load_spy_regime()
