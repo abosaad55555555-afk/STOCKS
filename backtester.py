@@ -17,8 +17,54 @@ def normalize(df):
     return pd.DataFrame(out, index=df.index)
 
 
+def compute_rsi(series, length=14):
+    delta = series.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.rolling(length).mean()
+    avg_loss = loss.rolling(length).mean()
+    rs = avg_gain / (avg_loss + 1e-9)
+    return 100 - (100 / (1 + rs))
+
+
+def compute_atr(df, length=14):
+    hl = df["High"] - df["Low"]
+    hc = (df["High"] - df["Close"].shift()).abs()
+    lc = (df["Low"] - df["Close"].shift()).abs()
+    tr = pd.concat([hl, hc, lc], axis=1).max(axis=1)
+    return tr.rolling(length).mean()
+
+
+def detect_hammer(df):
+    o = df["Open"]
+    c = df["Close"]
+    h = df["High"]
+    l = df["Low"]
+
+    body = (c - o).abs()
+    candle_range = h - l
+    lower_shadow = (o.where(o < c, c) - l)
+    upper_shadow = (h - o.where(o > c, c))
+
+    # هامر معقول (مش شديد ولا متساهل)
+    return (
+        (candle_range > 0) &
+        (body <= candle_range * 0.4) &         # جسم صغير
+        (lower_shadow >= candle_range * 0.4) & # ذيل سفلي طويل
+        (upper_shadow <= candle_range * 0.2)   # ذيل علوي صغير
+    )
+
+
+def simulate_option(stock_return):
+    if stock_return >= PROFIT_TARGET:
+        return min(stock_return * random.uniform(1.5, 2.0), 1.0)
+    elif stock_return <= STOP_LOSS:
+        return max(stock_return * random.uniform(1.5, 2.5), -0.9)
+    else:
+        return stock_return * random.uniform(1.0, 1.5)
+
+
 def load_spy_regime():
-    # نخلّيها موجودة لو حبيت تستخدمها لاحقاً، لكنها غير مؤثرة الآن
     raw = None
     for _ in range(5):
         raw = yf.download("SPY", start=START, auto_adjust=False, progress=False)
@@ -55,38 +101,47 @@ def load_spy_regime():
     return spy["Bull"]
 
 
-def simulate_option(stock_return):
-    if stock_return >= PROFIT_TARGET:
-        return min(stock_return * random.uniform(1.5, 2.0), 1.0)
-    elif stock_return <= STOP_LOSS:
-        return max(stock_return * random.uniform(1.5, 2.5), -0.9)
-    else:
-        return stock_return * random.uniform(1.0, 1.5)
-
-
 def backtest_ticker(ticker, spy_bull):
     try:
-        df = yf.download(ticker, start=START, auto_adjust=False, progress=False)
-        if df.empty:
+        df_raw = yf.download(ticker, start=START, auto_adjust=False, progress=False)
+        if df_raw.empty:
             print(f"{ticker}: EMPTY from yfinance")
             return None
 
-        df = normalize(df)
+        df = normalize(df_raw)
 
-        # لو كل الأعمدة NaN → نعتبره فاضي
         if df["Close"].isna().all():
             print(f"{ticker}: all NaN after normalize")
             return None
 
-        # DEBUG: اطبع أول كم سطر في اللوق
-        print(f"{ticker} head:\n", df.head())
+        # مؤشرات
+        df["Rsi"] = compute_rsi(df["Close"])
+        df["Atr"] = compute_atr(df)
+        df["Vol20"] = df["Volume"].rolling(20).mean()
+        df["Hammer"] = detect_hammer(df)
 
-        # أبسط إشارة ممكنة: كل يوم (ما عدا آخر MAX_HOLD_DAYS) هو إشارة
-        df["Signal"] = False
-        if len(df) > MAX_HOLD_DAYS + 1:
-            df.iloc[:-MAX_HOLD_DAYS, df.columns.get_loc("Signal")] = True
-        else:
-            df["Signal"] = True  # لو السهم قصير التاريخ، خله كله إشارات
+        df["Sma10"] = df["Close"].rolling(10).mean()
+        df["Sma20"] = df["Close"].rolling(20).mean()
+        df["Downtrend"] = (df["Close"] < df["Sma10"]) & (df["Sma10"] < df["Sma20"])
+
+        vwap = (df["Close"] * df["Volume"]).rolling(60).sum() / df["Volume"].rolling(60).sum()
+        df["Vwap60"] = vwap
+        df["Nearvwap"] = (df["Low"] <= vwap) & (df["High"] >= vwap)
+
+        df["Confirm"] = df["Close"].shift(-1) > df["High"]
+
+        df["Bull"] = spy_bull.reindex(df.index).fillna(False)
+
+        # الإشارة الأصلية الكاملة
+        df["Signal"] = (
+            df["Hammer"]
+            & df["Downtrend"]
+            & df["Confirm"]
+            & df["Rsi"].between(20, 70)
+            & (df["Volume"] > 0.7 * df["Vol20"])
+            & df["Nearvwap"]
+            & df["Bull"]
+        )
 
         trades = []
         sig_idx = np.where(df["Signal"])[0]
@@ -127,11 +182,15 @@ def backtest_ticker(ticker, spy_bull):
                 "OptionReturn": opt_ret
             })
 
-        if not trades:
-            print(f"{ticker}: no trades even with trivial signal")
-            return None
+        # LOG أساسي لكل سهم
+        print(
+            f"{ticker}: rows={len(df)}, "
+            f"hammers={int(df['Hammer'].sum())}, "
+            f"signals={int(df['Signal'].sum())}, "
+            f"trades={len(trades)}"
+        )
 
-        return pd.DataFrame(trades)
+        return pd.DataFrame(trades) if trades else None
 
     except Exception as e:
         print(f"ERROR {ticker}: {e}")
