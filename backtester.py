@@ -27,14 +27,6 @@ def compute_rsi(series, length=14):
     return 100 - (100 / (1 + rs))
 
 
-def compute_atr(df, length=14):
-    hl = df["High"] - df["Low"]
-    hc = (df["High"] - df["Close"].shift()).abs()
-    lc = (df["Low"] - df["Close"].shift()).abs()
-    tr = pd.concat([hl, hc, lc], axis=1).max(axis=1)
-    return tr.rolling(length).mean()
-
-
 def detect_hammer(df):
     o = df["Open"]
     c = df["Close"]
@@ -46,93 +38,63 @@ def detect_hammer(df):
     lower_shadow = (o.where(o < c, c) - l)
     upper_shadow = (h - o.where(o > c, c))
 
-    # هامر معقول (مش شديد ولا متساهل)
     return (
         (candle_range > 0) &
-        (body <= candle_range * 0.4) &         # جسم صغير
-        (lower_shadow >= candle_range * 0.4) & # ذيل سفلي طويل
-        (upper_shadow <= candle_range * 0.2)   # ذيل علوي صغير
+        (body <= candle_range * 0.4) &
+        (lower_shadow >= candle_range * 0.4) &
+        (upper_shadow <= candle_range * 0.2)
     )
 
 
-def simulate_option(stock_return):
-    if stock_return >= PROFIT_TARGET:
-        return min(stock_return * random.uniform(1.5, 2.0), 1.0)
-    elif stock_return <= STOP_LOSS:
-        return max(stock_return * random.uniform(1.5, 2.5), -0.9)
-    else:
-        return stock_return * random.uniform(1.0, 1.5)
-
-
 def load_spy_regime():
-    raw = None
-    for _ in range(5):
-        raw = yf.download("SPY", start=START, auto_adjust=False, progress=False)
-        if isinstance(raw, pd.DataFrame) and not raw.empty:
-            break
+    raw = yf.download("SPY", start=START, auto_adjust=False, progress=False)
+    if raw.empty:
+        return pd.Series(False, index=pd.date_range(start=START, periods=5000, freq="D"))
 
-    if not isinstance(raw, pd.DataFrame) or raw.empty:
-        idx = pd.date_range(start=START, periods=5000, freq="D")
-        return pd.Series(True, index=idx)
+    if isinstance(raw.columns, pd.MultiIndex):
+        raw.columns = raw.columns.get_level_values(0)
 
-    spy = raw.copy()
+    raw.columns = [c.capitalize() for c in raw.columns]
 
-    if isinstance(spy.columns, pd.MultiIndex):
-        spy.columns = spy.columns.get_level_values(0)
-
-    spy.columns = [str(c).capitalize() for c in spy.columns]
-
-    required = ["Open", "High", "Low", "Close", "Volume"]
-    for col in required:
-        if col not in spy.columns:
-            spy[col] = np.nan
-
-    spy = spy.apply(pd.to_numeric, errors="coerce")
-    spy = spy.dropna(subset=["Close"])
-
-    if spy.empty:
-        idx = pd.date_range(start=START, periods=5000, freq="D")
-        return pd.Series(True, index=idx)
-
-    spy["Sma200"] = spy["Close"].rolling(200, min_periods=1).mean()
-    spy = spy.ffill().bfill()
-
-    spy["Bull"] = spy["Close"] > spy["Sma200"]
-    return spy["Bull"]
+    raw["Sma200"] = raw["Close"].rolling(200).mean()
+    raw["Bull"] = raw["Close"] > raw["Sma200"]
+    return raw["Bull"]
 
 
 def backtest_ticker(ticker, spy_bull):
     try:
         df_raw = yf.download(ticker, start=START, auto_adjust=False, progress=False)
         if df_raw.empty:
-            print(f"{ticker}: EMPTY from yfinance")
-            return None
+            return f"{ticker}: DATA EMPTY"
 
         df = normalize(df_raw)
 
-        if df["Close"].isna().all():
-            print(f"{ticker}: all NaN after normalize")
-            return None
-
         # مؤشرات
-        df["Rsi"] = compute_rsi(df["Close"])
-        df["Atr"] = compute_atr(df)
-        df["Vol20"] = df["Volume"].rolling(20).mean()
         df["Hammer"] = detect_hammer(df)
-
+        df["Rsi"] = compute_rsi(df["Close"])
         df["Sma10"] = df["Close"].rolling(10).mean()
         df["Sma20"] = df["Close"].rolling(20).mean()
         df["Downtrend"] = (df["Close"] < df["Sma10"]) & (df["Sma10"] < df["Sma20"])
-
+        df["Vol20"] = df["Volume"].rolling(20).mean()
         vwap = (df["Close"] * df["Volume"]).rolling(60).sum() / df["Volume"].rolling(60).sum()
-        df["Vwap60"] = vwap
         df["Nearvwap"] = (df["Low"] <= vwap) & (df["High"] >= vwap)
-
         df["Confirm"] = df["Close"].shift(-1) > df["High"]
-
         df["Bull"] = spy_bull.reindex(df.index).fillna(False)
 
-        # الإشارة الأصلية الكاملة
+        # LOG لكل فلتر
+        log = (
+            f"{ticker}:\n"
+            f"  rows: {len(df)}\n"
+            f"  hammer: {df['Hammer'].sum()}\n"
+            f"  downtrend: {df['Downtrend'].sum()}\n"
+            f"  confirm: {df['Confirm'].sum()}\n"
+            f"  rsi(20-70): {df['Rsi'].between(20,70).sum()}\n"
+            f"  vol filter: {(df['Volume'] > 0.7*df['Vol20']).sum()}\n"
+            f"  near vwap: {df['Nearvwap'].sum()}\n"
+            f"  bull: {df['Bull'].sum()}\n"
+        )
+
+        # الإشارة الأصلية
         df["Signal"] = (
             df["Hammer"]
             & df["Downtrend"]
@@ -143,55 +105,9 @@ def backtest_ticker(ticker, spy_bull):
             & df["Bull"]
         )
 
-        trades = []
-        sig_idx = np.where(df["Signal"])[0]
+        log += f"  FINAL SIGNALS: {df['Signal'].sum()}\n"
 
-        for i in sig_idx:
-            entry_idx = i + 1
-            if entry_idx >= len(df):
-                continue
-
-            entry_price = df["Open"].iloc[entry_idx]
-            entry_date = df.index[entry_idx]
-
-            exit_idx = min(entry_idx + MAX_HOLD_DAYS, len(df) - 1)
-            window = df.iloc[entry_idx:exit_idx + 1]
-
-            prices = window["Close"]
-            stock_returns = (prices / entry_price) - 1
-
-            hit_target = stock_returns >= PROFIT_TARGET
-            hit_stop = stock_returns <= STOP_LOSS
-
-            if hit_target.any():
-                exit_loc = hit_target.idxmax()
-            elif hit_stop.any():
-                exit_loc = hit_stop.idxmax()
-            else:
-                exit_loc = prices.index[-1]
-
-            exit_price = df.loc[exit_loc, "Close"]
-            stock_ret = (exit_price / entry_price) - 1
-            opt_ret = simulate_option(stock_ret)
-
-            trades.append({
-                "Ticker": ticker,
-                "EntryDate": entry_date,
-                "ExitDate": exit_loc,
-                "StockReturn": stock_ret,
-                "OptionReturn": opt_ret
-            })
-
-        # LOG أساسي لكل سهم
-        print(
-            f"{ticker}: rows={len(df)}, "
-            f"hammers={int(df['Hammer'].sum())}, "
-            f"signals={int(df['Signal'].sum())}, "
-            f"trades={len(trades)}"
-        )
-
-        return pd.DataFrame(trades) if trades else None
+        return log
 
     except Exception as e:
-        print(f"ERROR {ticker}: {e}")
-        return None
+        return f"{ticker}: ERROR {e}"
