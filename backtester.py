@@ -48,16 +48,35 @@ def detect_hammer(df):
 
 def load_spy_regime():
     raw = yf.download("SPY", start=START, auto_adjust=False, progress=False)
-    if raw.empty:
-        return pd.Series(False, index=pd.date_range(start=START, periods=5000, freq="D"))
 
+    if raw is None or raw.empty:
+        idx = pd.date_range(start=START, periods=5000, freq="D")
+        return pd.Series(False, index=idx)
+
+    # FIX: flatten MultiIndex
     if isinstance(raw.columns, pd.MultiIndex):
         raw.columns = raw.columns.get_level_values(0)
 
-    raw.columns = [c.capitalize() for c in raw.columns]
+    # FIX: unify column names
+    raw.columns = [str(c).capitalize() for c in raw.columns]
 
-    raw["Sma200"] = raw["Close"].rolling(200).mean()
+    # FIX: ensure OHLCV exists
+    for col in ["Open", "High", "Low", "Close", "Volume"]:
+        if col not in raw.columns:
+            raw[col] = np.nan
+
+    raw = raw.apply(pd.to_numeric, errors="coerce")
+    raw = raw.dropna(subset=["Close"])
+
+    if raw.empty:
+        idx = pd.date_range(start=START, periods=5000, freq="D")
+        return pd.Series(False, index=idx)
+
+    raw["Sma200"] = raw["Close"].rolling(200, min_periods=1).mean()
     raw["Bull"] = raw["Close"] > raw["Sma200"]
+
+    raw = raw.ffill().bfill()
+
     return raw["Bull"]
 
 
@@ -69,19 +88,20 @@ def backtest_ticker(ticker, spy_bull):
 
         df = normalize(df_raw)
 
-        # مؤشرات
         df["Hammer"] = detect_hammer(df)
         df["Rsi"] = compute_rsi(df["Close"])
         df["Sma10"] = df["Close"].rolling(10).mean()
         df["Sma20"] = df["Close"].rolling(20).mean()
         df["Downtrend"] = (df["Close"] < df["Sma10"]) & (df["Sma10"] < df["Sma20"])
         df["Vol20"] = df["Volume"].rolling(20).mean()
+
         vwap = (df["Close"] * df["Volume"]).rolling(60).sum() / df["Volume"].rolling(60).sum()
         df["Nearvwap"] = (df["Low"] <= vwap) & (df["High"] >= vwap)
+
         df["Confirm"] = df["Close"].shift(-1) > df["High"]
         df["Bull"] = spy_bull.reindex(df.index).fillna(False)
 
-        # LOG لكل فلتر
+        # LOG
         log = (
             f"{ticker}:\n"
             f"  rows: {len(df)}\n"
@@ -94,7 +114,6 @@ def backtest_ticker(ticker, spy_bull):
             f"  bull: {df['Bull'].sum()}\n"
         )
 
-        # الإشارة الأصلية
         df["Signal"] = (
             df["Hammer"]
             & df["Downtrend"]
