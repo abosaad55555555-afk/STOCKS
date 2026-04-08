@@ -1,7 +1,6 @@
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import random
 
 START = "2010-01-01"
 MAX_HOLD_DAYS = 5
@@ -12,17 +11,24 @@ STOP_LOSS = -0.10
 def normalize(df):
     cols = ["Open", "High", "Low", "Close", "Volume"]
     out = {}
+
     for c in cols:
-        out[c] = pd.to_numeric(df[c], errors="coerce") if c in df else np.nan
+        if c in df:
+            out[c] = pd.to_numeric(df[c], errors="coerce")
+        else:
+            # Always return a Series, never a scalar
+            out[c] = pd.Series(np.nan, index=df.index)
+
     return pd.DataFrame(out, index=df.index)
 
 
 def compute_rsi(series, length=14):
+    series = pd.to_numeric(series, errors="coerce")
     delta = series.diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
-    avg_gain = gain.rolling(length).mean()
-    avg_loss = loss.rolling(length).mean()
+    avg_gain = gain.rolling(length, min_periods=1).mean()
+    avg_loss = loss.rolling(length, min_periods=1).mean()
     rs = avg_gain / (avg_loss + 1e-9)
     return 100 - (100 / (1 + rs))
 
@@ -53,14 +59,14 @@ def load_spy_regime():
         idx = pd.date_range(start=START, periods=5000, freq="D")
         return pd.Series(False, index=idx)
 
-    # FIX: flatten MultiIndex
+    # Flatten MultiIndex if present
     if isinstance(raw.columns, pd.MultiIndex):
         raw.columns = raw.columns.get_level_values(0)
 
-    # FIX: unify column names
+    # Normalize column names
     raw.columns = [str(c).capitalize() for c in raw.columns]
 
-    # FIX: ensure OHLCV exists
+    # Ensure OHLCV exists
     for col in ["Open", "High", "Low", "Close", "Volume"]:
         if col not in raw.columns:
             raw[col] = np.nan
@@ -83,33 +89,38 @@ def load_spy_regime():
 def backtest_ticker(ticker, spy_bull):
     try:
         df_raw = yf.download(ticker, start=START, auto_adjust=False, progress=False)
-        if df_raw.empty:
+        if df_raw is None or df_raw.empty:
             return f"{ticker}: DATA EMPTY"
 
         df = normalize(df_raw)
 
+        # Basic sanity checks
+        if df["Close"].isna().all():
+            return f"{ticker}: ERROR – Close prices all NaN"
+
         df["Hammer"] = detect_hammer(df)
         df["Rsi"] = compute_rsi(df["Close"])
-        df["Sma10"] = df["Close"].rolling(10).mean()
-        df["Sma20"] = df["Close"].rolling(20).mean()
+        df["Sma10"] = df["Close"].rolling(10, min_periods=1).mean()
+        df["Sma20"] = df["Close"].rolling(20, min_periods=1).mean()
         df["Downtrend"] = (df["Close"] < df["Sma10"]) & (df["Sma10"] < df["Sma20"])
-        df["Vol20"] = df["Volume"].rolling(20).mean()
+        df["Vol20"] = df["Volume"].rolling(20, min_periods=1).mean()
 
-        vwap = (df["Close"] * df["Volume"]).rolling(60).sum() / df["Volume"].rolling(60).sum()
+        vwap_num = (df["Close"] * df["Volume"]).rolling(60, min_periods=1).sum()
+        vwap_den = df["Volume"].rolling(60, min_periods=1).sum()
+        vwap = vwap_num / (vwap_den + 1e-9)
         df["Nearvwap"] = (df["Low"] <= vwap) & (df["High"] >= vwap)
 
         df["Confirm"] = df["Close"].shift(-1) > df["High"]
         df["Bull"] = spy_bull.reindex(df.index).fillna(False)
 
-        # LOG
         log = (
             f"{ticker}:\n"
             f"  rows: {len(df)}\n"
             f"  hammer: {df['Hammer'].sum()}\n"
             f"  downtrend: {df['Downtrend'].sum()}\n"
             f"  confirm: {df['Confirm'].sum()}\n"
-            f"  rsi(20-70): {df['Rsi'].between(20,70).sum()}\n"
-            f"  vol filter: {(df['Volume'] > 0.7*df['Vol20']).sum()}\n"
+            f"  rsi(20-70): {df['Rsi'].between(20, 70).sum()}\n"
+            f"  vol filter: {(df['Volume'] > 0.7 * df['Vol20']).sum()}\n"
             f"  near vwap: {df['Nearvwap'].sum()}\n"
             f"  bull: {df['Bull'].sum()}\n"
         )
