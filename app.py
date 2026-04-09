@@ -2,6 +2,7 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import plotly.express as px
 
 # ----------------- إعدادات عامة -----------------
 START = "2010-01-01"
@@ -356,7 +357,7 @@ st.success("تم تحميل بيانات SPY بنجاح.")
 selected_tickers = st.multiselect(
     "اختر الأسهم:",
     LIQUID_TICKERS,
-    default=LIQUID_TICKERS[:50],  # مثلاً أول 50 بشكل افتراضي
+    default=LIQUID_TICKERS[:50],
 )
 
 run_button = st.button("ابدأ الباك تست")
@@ -407,7 +408,10 @@ if run_button:
 
             if not equity.empty:
                 st.write("#### Equity Curve (سهم واحد)")
-                st.line_chart(equity)
+                eq_df = equity.reset_index()
+                eq_df.columns = ["date", "equity"]
+                fig = px.line(eq_df, x="date", y="equity", title=f"Equity Curve – {ticker}")
+                st.plotly_chart(fig, use_container_width=True)
 
         # مقارنة بين الأسهم
         if all_summaries:
@@ -417,7 +421,9 @@ if run_button:
             st.dataframe(summary_df.sort_values("cum_return", ascending=False))
 
             st.write("#### عائد تراكمي لكل سهم")
-            st.bar_chart(summary_df["cum_return"])
+            bar_df = summary_df.reset_index()
+            fig_bar = px.bar(bar_df, x="ticker", y="cum_return", title="Cumulative Return per Stock")
+            st.plotly_chart(fig_bar, use_container_width=True)
 
         # محفظة كاملة
         if all_trades_list:
@@ -428,7 +434,11 @@ if run_button:
             portfolio_equity = build_portfolio_equity(portfolio_trades)
 
             st.write("#### Equity Curve للمحفظة")
-            st.line_chart(portfolio_equity)
+            if not portfolio_equity.empty:
+                port_eq_df = portfolio_equity.reset_index()
+                port_eq_df.columns = ["date", "equity"]
+                fig_port = px.line(port_eq_df, x="date", y="equity", title="Portfolio Equity Curve")
+                st.plotly_chart(fig_port, use_container_width=True)
 
             port_summary = summarize_trades(portfolio_trades)
             st.write("#### Summary للمحفظة")
