@@ -2,12 +2,12 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import plotly.express as px
+import matplotlib.pyplot as plt
 
 # ----------------- إعدادات عامة -----------------
 START = "2010-01-01"
 
-# 600 CBOE optionable, عالية السيولة – داخل الكود مباشرة
+# ----------------- قائمة 600 سهم Optionable كاملة -----------------
 LIQUID_TICKERS = [
 "AAPL","MSFT","AMZN","NVDA","META","GOOGL","GOOG","TSLA","AVGO","BRK.B",
 "JPM","V","MA","HD","PG","XOM","UNH","LLY","JNJ","COST","BAC",
@@ -85,8 +85,7 @@ LIQUID_TICKERS = [
 "DIS","NFLX","ROKU","PARA","WBD","FOXA","LYV","IMAX","AMCX","SPOT",
 "GOOGL","META","SNAP","PINS","TWTR","BIDU","BABA","JD","PDD","TCEHY"
 ]
-
-# ----------------- دوال المساعدة -----------------
+# ----------------- دوال المساعدة الأساسية -----------------
 def normalize(df):
     cols = ["Open", "High", "Low", "Close", "Volume"]
     out = {}
@@ -175,38 +174,43 @@ def load_spy_regime():
     return raw["Bull"]
 
 
-# ----------------- بناء الإشارات المحسّنة – Balanced V2 -----------------
+# ----------------- Balanced V2.5 – Aggressive Enhanced Signals -----------------
 def build_signals(df, spy_bull):
     df["Hammer"] = detect_hammer(df)
     df["Rsi"] = compute_rsi(df["Close"])
     df["Atr14"] = compute_atr(df, 14)
     df["Sma10"] = df["Close"].rolling(10, min_periods=1).mean()
     df["Sma20"] = df["Close"].rolling(20, min_periods=1).mean()
+    df["Sma50"] = df["Close"].rolling(50, min_periods=1).mean()
     df["Vol20"] = df["Volume"].rolling(20, min_periods=1).mean()
 
-    # ترند محسّن: السعر تحت Sma20 + Sma10 تحت Sma20
-    df["Trend"] = (df["Sma10"] < df["Sma20"]) & (df["Close"] < df["Sma20"])
+    # ترند أقوى: Sma10 < Sma20 < Sma50
+    df["Trend"] = (df["Sma10"] < df["Sma20"]) & (df["Sma20"] < df["Sma50"])
 
-    # تأكيد محسّن: إغلاق الغد أعلى من افتتاح اليوم
-    df["Confirm"] = df["Close"].shift(-1) > df["Open"]
+    # تأكيد أقوى: إغلاق الغد أعلى من أعلى سعر اليوم
+    df["Confirm"] = df["Close"].shift(-1) > df["High"]
 
-    # قوة الشمعة (ATR أخف من V1)
+    # قوة الشمعة (أكثر تيسيرًا من V2)
     candle_range = df["High"] - df["Low"]
-    strong_range = candle_range > 0.35 * df["Atr14"]
+    strong_range = candle_range > 0.30 * df["Atr14"]
 
     # فلتر تقلبات: نتجنب الفترات الميتة
     df["VolFilter"] = df["Atr14"] > df["Atr14"].rolling(50, min_periods=1).mean()
 
+    # فلتر حماية من الشموع المجنونة
+    df["NoSpike"] = (df["High"] - df["Low"]) < df["Atr14"] * 3
+
     df["Bull"] = spy_bull.reindex(df.index).fillna(False)
 
-    # الإشارة النهائية Balanced V2
+    # الإشارة النهائية – Aggressive Enhanced
     df["Signal"] = (
         df["Hammer"]
         & df["Trend"]
         & df["Confirm"]
         & df["VolFilter"]
-        & df["Rsi"].between(17, 65)
-        & (df["Volume"] > 0.55 * df["Vol20"])
+        & df["NoSpike"]
+        & df["Rsi"].between(15, 68)
+        & (df["Volume"] > 0.50 * df["Vol20"])
         & df["Bull"]
         & strong_range
     )
@@ -342,13 +346,13 @@ def build_portfolio_equity(all_trades_df):
     eq = (1 + all_trades_df["return_pct"] / 100.0).cumprod()
     eq.index = all_trades_df["exit_date"]
     return eq
-
-
 # ----------------- واجهة Streamlit -----------------
-st.set_page_config(page_title="Hammer Backtest – Balanced V2", layout="wide")
+st.set_page_config(page_title="Hammer Backtest – Balanced V2.5 Aggressive", layout="wide")
 
-st.title("Hammer Backtest – Balanced High‑Performance Edition V2")
-st.write("نسخة متوازنة V2: Win Rate قوي + عدد صفقات أعلى + عائد تراكمي أقوى، على 600 سهم أوبشِنابل.")
+st.title("Hammer Backtest – Balanced V2.5 – Aggressive Enhanced Edition")
+st.write(
+    "نسخة Aggressive محسّنة من Balanced V2: عدد صفقات أعلى، عائد تراكمي أعلى، مع الحفاظ على Win Rate قوي."
+)
 
 with st.spinner("جاري تحميل بيانات SPY..."):
     spy_regime = load_spy_regime()
@@ -408,10 +412,12 @@ if run_button:
 
             if not equity.empty:
                 st.write("#### Equity Curve (سهم واحد)")
-                eq_df = equity.reset_index()
-                eq_df.columns = ["date", "equity"]
-                fig = px.line(eq_df, x="date", y="equity", title=f"Equity Curve – {ticker}")
-                st.plotly_chart(fig, use_container_width=True)
+                fig, ax = plt.subplots(figsize=(6, 3))
+                ax.plot(equity.index, equity.values, label=ticker)
+                ax.set_title(f"Equity Curve – {ticker}")
+                ax.grid(True, alpha=0.3)
+                ax.legend()
+                st.pyplot(fig)
 
         # مقارنة بين الأسهم
         if all_summaries:
@@ -421,9 +427,14 @@ if run_button:
             st.dataframe(summary_df.sort_values("cum_return", ascending=False))
 
             st.write("#### عائد تراكمي لكل سهم")
-            bar_df = summary_df.reset_index()
-            fig_bar = px.bar(bar_df, x="ticker", y="cum_return", title="Cumulative Return per Stock")
-            st.plotly_chart(fig_bar, use_container_width=True)
+            fig_bar, ax_bar = plt.subplots(figsize=(8, 4))
+            sorted_df = summary_df.sort_values("cum_return", ascending=False)
+            ax_bar.bar(sorted_df.index, sorted_df["cum_return"])
+            ax_bar.set_xticklabels(sorted_df.index, rotation=90)
+            ax_bar.set_ylabel("Cumulative Return %")
+            ax_bar.set_title("Cumulative Return per Stock")
+            ax_bar.grid(True, axis="y", alpha=0.3)
+            st.pyplot(fig_bar)
 
         # محفظة كاملة
         if all_trades_list:
@@ -435,10 +446,12 @@ if run_button:
 
             st.write("#### Equity Curve للمحفظة")
             if not portfolio_equity.empty:
-                port_eq_df = portfolio_equity.reset_index()
-                port_eq_df.columns = ["date", "equity"]
-                fig_port = px.line(port_eq_df, x="date", y="equity", title="Portfolio Equity Curve")
-                st.plotly_chart(fig_port, use_container_width=True)
+                fig_port, ax_port = plt.subplots(figsize=(8, 4))
+                ax_port.plot(portfolio_equity.index, portfolio_equity.values, label="Portfolio")
+                ax_port.set_title("Portfolio Equity Curve")
+                ax_port.grid(True, alpha=0.3)
+                ax_port.legend()
+                st.pyplot(fig_port)
 
             port_summary = summarize_trades(portfolio_trades)
             st.write("#### Summary للمحفظة")
