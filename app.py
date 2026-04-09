@@ -4,10 +4,8 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
-# ----------------- إعدادات عامة -----------------
 START = "2010-01-01"
 
-# ----------------- قائمة 600 سهم Optionable كاملة -----------------
 LIQUID_TICKERS = [
 "AAPL","MSFT","AMZN","NVDA","META","GOOGL","GOOG","TSLA","AVGO","BRK.B",
 "JPM","V","MA","HD","PG","XOM","UNH","LLY","JNJ","COST","BAC",
@@ -83,9 +81,37 @@ LIQUID_TICKERS = [
 "AVB","UDR","ESS","MAA","CPT","ARE","BXP","SLG","VNO","HST",
 "LEN","DHI","PHM","TOL","NVR","HD","LOW","TSCO","WMT","COST",
 "DIS","NFLX","ROKU","PARA","WBD","FOXA","LYV","IMAX","AMCX","SPOT",
+"GOOGL","META","SNAP","PINS","TWTR","BIDU","BABA","JD","PDD","TCEHY",
+"SHOP","MELI","SE","GLBE","WIX","SQ","PYPL","AFRM","UPST","SOFI",
+"NVDA","AMD","INTC","QCOM","TXN","MU","LRCX","KLAC","AMAT","ASML",
+"TSM","GFS","ON","WOLF","MRVL","SWKS","QRVO","AVGO","ADI","NXPI",
+"FSLR","ENPH","SEDG","RUN","SPWR","NEE","DUK","SO","AEP","ED",
+"XEL","PEG","D","EIX","PCG","SRE","WEC","CMS","ATO","NI",
+"BRK.A","BRK.B","MKL","AIG","MET","PRU","LNC","UNM","GL","PFG",
+"HIG","ALL","TRV","CB","AFL","PGR","CINF","WRB","RE","RNR",
+"SPGI","MSCI","ICE","NDAQ","CME","MCO","FDS","MKTX","TW","BR",
+"PANW","CRWD","ZS","FTNT","OKTA","DDOG","SNOW","MDB","NET","SPLK",
+"ORCL","SAP","ADBE","CRM","INTU","NOW","TEAM","WDAY","PAYC","MSFT",
+"AMZN","SHOP","MELI","SE","WMT","TGT","COST","DG","DLTR","BJ",
+"TSLA","RIVN","LCID","NIO","XPEV","LI","F","GM","STLA","HMC",
+"BA","LMT","NOC","RTX","GD","TDG","HEI","TXT","SPR","GE",
+"XOM","CVX","COP","OXY","PXD","EOG","DVN","FANG","MRO","APA",
+"SLB","HAL","BKR","VLO","PSX","MPC","HES","KMI","WMB","OKE",
+"JPM","BAC","WFC","C","GS","MS","USB","PNC","TFC","BK",
+"V","MA","AXP","DFS","COF","SYF","PYPL","SQ","AFRM","HOOD",
+"KO","PEP","MNST","KDP","CELH","STZ","BF.B","TAP","MO","PM",
+"PG","CL","KMB","CHD","EL","COTY","IPAR","UL","NKE","LULU",
+"HD","LOW","TSCO","WMT","COST","TGT","DG","DLTR","BJ","BBY",
+"CAT","DE","CMI","PCAR","OSK","AGCO","PWR","JCI","EMR","ETN",
+"MMM","HON","ROK","IR","XYL","AWK","AOS","MAS","FBHS","WHR",
+"PLD","AMT","CCI","EQIX","PSA","SPG","O","WELL","VTR","EQR",
+"AVB","UDR","ESS","MAA","CPT","ARE","BXP","SLG","VNO","HST",
+"LEN","DHI","PHM","TOL","NVR","HD","LOW","TSCO","WMT","COST",
+"DIS","NFLX","ROKU","PARA","WBD","FOXA","LYV","IMAX","AMCX","SPOT",
 "GOOGL","META","SNAP","PINS","TWTR","BIDU","BABA","JD","PDD","TCEHY"
 ]
 # ----------------- دوال المساعدة الأساسية -----------------
+
 def normalize(df):
     cols = ["Open", "High", "Low", "Close", "Volume"]
     out = {}
@@ -162,7 +188,6 @@ def load_spy_regime():
         raw.columns = raw.columns.get_level_values(0)
 
     raw.columns = [str(c).capitalize() for c in raw.columns]
-
     raw = raw.apply(pd.to_numeric, errors="coerce")
     raw = raw.dropna(subset=["Close"])
 
@@ -170,11 +195,9 @@ def load_spy_regime():
     raw["Bull"] = raw["Close"] > raw["Sma200"]
 
     raw = raw.ffill().bfill()
-
     return raw["Bull"]
-
-
 # ----------------- Balanced V2.5 – Aggressive Enhanced Signals -----------------
+
 def build_signals(df, spy_bull):
     df["Hammer"] = detect_hammer(df)
     df["Rsi"] = compute_rsi(df["Close"])
@@ -190,16 +213,17 @@ def build_signals(df, spy_bull):
     # تأكيد أقوى: إغلاق الغد أعلى من أعلى سعر اليوم
     df["Confirm"] = df["Close"].shift(-1) > df["High"]
 
-    # قوة الشمعة (أكثر تيسيرًا من V2)
+    # قوة الشمعة
     candle_range = df["High"] - df["Low"]
     strong_range = candle_range > 0.30 * df["Atr14"]
 
-    # فلتر تقلبات: نتجنب الفترات الميتة
+    # فلتر تقلبات
     df["VolFilter"] = df["Atr14"] > df["Atr14"].rolling(50, min_periods=1).mean()
 
     # فلتر حماية من الشموع المجنونة
     df["NoSpike"] = (df["High"] - df["Low"]) < df["Atr14"] * 3
 
+    # فلتر SPY
     df["Bull"] = spy_bull.reindex(df.index).fillna(False)
 
     # الإشارة النهائية – Aggressive Enhanced
@@ -217,7 +241,10 @@ def build_signals(df, spy_bull):
 
     return df
 
-def simulate_trades(df, ticker):
+
+# ----------------- صفقات: دخول Next Open خروج Same Close -----------------
+
+def simulate_trades(df, ticker, mode="stock"):
     trades = []
     signal_dates = df.index[df["Signal"]].tolist()
 
@@ -236,11 +263,19 @@ def simulate_trades(df, ticker):
         # -----------------------------
         #   محاكاة شراء Call Options
         # -----------------------------
-        leverage = 3.0  # قوة حركة الأوبشن (تقريب)
-        ret = ((exit_close - entry_open) / entry_open) * leverage
+        if mode == "call_3x":
+            leverage = 3.0
+            ret = ((exit_close - entry_open) / entry_open) * leverage
+            ret = max(ret, -1.0)
 
-        # لا نسمح بخسارة تتجاوز -100%
-        ret = max(ret, -1.0)
+        elif mode == "call_5x":
+            leverage = 5.0
+            ret = ((exit_close - entry_open) / entry_open) * leverage
+            ret = max(ret, -1.0)
+
+        else:
+            # وضع الأسهم العادي
+            ret = (exit_close - entry_open) / entry_open
 
         trades.append(
             {
@@ -261,11 +296,45 @@ def simulate_trades(df, ticker):
     trades_df.sort_values("entry_date", inplace=True)
     trades_df.reset_index(drop=True, inplace=True)
     return trades_df
+def summarize_trades(trades_df):
+    if trades_df.empty:
+        return {
+            "trades": 0,
+            "win_rate": 0.0,
+            "avg_return": 0.0,
+            "max_gain": 0.0,
+            "max_loss": 0.0,
+            "cum_return": 0.0,
+        }
+
+    n = len(trades_df)
+    wins = (trades_df["return_pct"] > 0).sum()
+    win_rate = wins / n * 100.0
+    avg_return = trades_df["return_pct"].mean()
+    max_gain = trades_df["return_pct"].max()
+    max_loss = trades_df["return_pct"].min()
+    cum_return = (1 + trades_df["return_pct"] / 100.0).prod() - 1
+
+    return {
+        "trades": n,
+        "win_rate": win_rate,
+        "avg_return": avg_return,
+        "max_gain": max_gain,
+        "max_loss": max_loss,
+        "cum_return": cum_return * 100.0,
+    }
 
 
+def equity_curve_from_trades(trades_df):
+    if trades_df.empty:
+        return pd.Series(dtype=float)
 
-# ----------------- باك تست سهم واحد -----------------
-def backtest_ticker(ticker, spy_bull):
+    eq = (1 + trades_df["return_pct"] / 100.0).cumprod()
+    eq.index = trades_df["exit_date"]
+    return eq
+
+
+def backtest_ticker(ticker, spy_bull, mode="stock"):
     try:
         df_raw = yf.download(ticker, start=START, auto_adjust=False, progress=False)
         if df_raw is None or df_raw.empty:
@@ -285,7 +354,7 @@ def backtest_ticker(ticker, spy_bull):
             f"  signals: {df['Signal'].sum()}\n"
         )
 
-        trades_df = simulate_trades(df, ticker)
+        trades_df = simulate_trades(df, ticker, mode=mode)
         summary = summarize_trades(trades_df)
         equity = equity_curve_from_trades(trades_df)
 
@@ -305,7 +374,6 @@ def backtest_ticker(ticker, spy_bull):
         }
 
 
-# ----------------- محفظة كاملة -----------------
 def build_portfolio_equity(all_trades_df):
     if all_trades_df.empty:
         return pd.Series(dtype=float)
@@ -321,6 +389,19 @@ st.title("Hammer Backtest – Balanced V2.5 – Aggressive Enhanced Edition")
 st.write(
     "نسخة Aggressive محسّنة من Balanced V2: عدد صفقات أعلى، عائد تراكمي أعلى، مع الحفاظ على Win Rate قوي."
 )
+
+# اختيار نوع التنفيذ: أسهم أو أوبشن
+mode_label = st.selectbox(
+    "نوع التنفيذ:",
+    ["Stocks (بدون رافعة)", "Call Options 3x", "Call Options 5x"],
+)
+
+if mode_label == "Stocks (بدون رافعة)":
+    mode = "stock"
+elif mode_label == "Call Options 3x":
+    mode = "call_3x"
+else:
+    mode = "call_5x"
 
 with st.spinner("جاري تحميل بيانات SPY..."):
     spy_regime = load_spy_regime()
@@ -348,7 +429,7 @@ if run_button:
             st.subheader(f"🔍 {ticker}")
 
             with st.spinner(f"تشغيل الباك تست لـ {ticker}..."):
-                result = backtest_ticker(ticker, spy_regime)
+                result = backtest_ticker(ticker, spy_regime, mode=mode)
 
             st.write("#### Log")
             st.code(result["log"])
