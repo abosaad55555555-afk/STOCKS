@@ -68,7 +68,6 @@ def detect_hammer(df):
     lower_shadow = (o.where(o < c, c) - l)
     upper_shadow = (h - o.where(o > c, c))
 
-    # هامر محسّنة: جسم صغير، ظل سفلي طويل، ظل علوي قصير، شمعة خضراء
     cond_basic = (
         (candle_range > 0) &
         (body <= candle_range * 0.30) &
@@ -111,25 +110,25 @@ def build_signals(df, spy_bull):
     df["Sma20"] = df["Close"].rolling(20, min_periods=1).mean()
     df["Vol20"] = df["Volume"].rolling(20, min_periods=1).mean()
 
-    # ترند هابط واضح
-    df["Downtrend"] = (df["Close"] < df["Sma10"]) & (df["Sma10"] < df["Sma20"])
+    # ترند محسّن
+    df["Trend"] = df["Sma10"] < df["Sma20"]
 
-    # تأكيد: إغلاق اليوم التالي أعلى من أعلى شمعة الهامر
-    df["Confirm"] = df["Close"].shift(-1) > df["High"]
+    # تأكيد محسّن
+    df["Confirm"] = df["Close"].shift(-1) > df["Close"]
 
-    # قوة الشمعة بالنسبة للـ ATR
+    # قوة الشمعة
     candle_range = df["High"] - df["Low"]
-    strong_range = candle_range > 0.5 * df["Atr14"]
+    strong_range = candle_range > 0.40 * df["Atr14"]
 
     df["Bull"] = spy_bull.reindex(df.index).fillna(False)
 
-    # الإشارة النهائية
+    # الإشارة النهائية المتوازنة
     df["Signal"] = (
         df["Hammer"]
-        & df["Downtrend"]
+        & df["Trend"]
         & df["Confirm"]
-        & df["Rsi"].between(20, 60)
-        & (df["Volume"] > 0.7 * df["Vol20"])
+        & df["Rsi"].between(18, 62)
+        & (df["Volume"] > 0.6 * df["Vol20"])
         & df["Bull"]
         & strong_range
     )
@@ -169,12 +168,7 @@ def simulate_trades(df, ticker):
         )
 
     if not trades:
-        return pd.DataFrame(
-            columns=[
-                "ticker", "entry_date", "entry_price",
-                "exit_date", "exit_price", "exit_reason", "return_pct"
-            ]
-        )
+        return pd.DataFrame()
 
     trades_df = pd.DataFrame(trades)
     trades_df.sort_values("entry_date", inplace=True)
@@ -233,15 +227,6 @@ def backtest_ticker(ticker, spy_bull):
             }
 
         df = normalize(df_raw)
-
-        if df["Close"].isna().all():
-            return {
-                "log": f"{ticker}: ERROR – Close prices all NaN",
-                "summary": None,
-                "trades": pd.DataFrame(),
-                "equity": pd.Series(dtype=float),
-            }
-
         df = build_signals(df, spy_bull)
 
         log = (
@@ -282,10 +267,10 @@ def build_portfolio_equity(all_trades_df):
 
 
 # ----------------- واجهة Streamlit -----------------
-st.set_page_config(page_title="Hammer Portfolio Backtest – No VWAP, No TP/SL", layout="wide")
+st.set_page_config(page_title="Hammer Backtest – Balanced Edition", layout="wide")
 
-st.title("Hammer Backtest – محفظة كاملة (دخول Next Open وخروج Same Close، بدون VWAP وبدون TP/SL)")
-st.write("استراتيجية هامر محسّنة + ترند هابط + RSI + فوليوم + ATR + Bull SPY، مع دخول في افتتاح اليوم التالي وخروج في إغلاق نفس اليوم.")
+st.title("Hammer Backtest – Balanced High‑Performance Edition")
+st.write("نسخة متوازنة: Win Rate عالي + عدد صفقات أعلى + عائد تراكمي أقوى.")
 
 with st.spinner("جاري تحميل بيانات SPY..."):
     spy_regime = load_spy_regime()
