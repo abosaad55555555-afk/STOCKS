@@ -6,11 +6,84 @@ import numpy as np
 # ----------------- إعدادات عامة -----------------
 START = "2010-01-01"
 
+# 600 CBOE optionable, عالية السيولة – داخل الكود مباشرة
 LIQUID_TICKERS = [
-    "AAPL", "MSFT", "AMZN", "GOOGL", "GOOG",
-    "META", "NVDA", "TSLA", "AVGO", "ADBE",
+"AAPL","MSFT","AMZN","NVDA","META","GOOGL","GOOG","TSLA","AVGO","BRK.B",
+"JPM","V","MA","HD","PG","XOM","UNH","LLY","JNJ","COST","BAC",
+"WMT","MRK","PEP","KO","ABBV","CVX","ADBE","CRM","NFLX","ACN",
+"LIN","MCD","AMD","TMO","WFC","INTC","TXN","MS","PM","NEE",
+"UNP","IBM","HON","AMGN","LOW","CAT","ORCL","GS","SPGI","BLK",
+"RTX","NOW","QCOM","AMAT","BKNG","GE","MDT","ISRG","SYK","LMT",
+"DE","AXP","ADI","SCHW","CB","PLD","ELV","MMC","PFE","C",
+"MO","DUK","SO","CI","GILD","REGN","ADP","BDX","USB","TGT",
+"ZTS","CSCO","VRTX","EQIX","ICE","FDX","NSC","CL","AON","APD",
+"SHW","ITW","MU","PANW","ETN","NKE","MAR","AEP","MCO","PSA",
+"WM","EMR","ROP","HCA","DHR","SBUX","LRCX","KLAC","FIS","FISV",
+"GM","HUM","AIG","MET","PRU","TRV","ALL","AFL","PGR","BK",
+"MSI","TEL","PH","ROST","CTAS","MNST","KMB","GIS","HSY","KHC",
+"MDLZ","SYY","KR","DG","DLTR","WBA","T","VZ","CMCSA","DIS",
+"FOX","FOXA","PARA","WBD","EA","TTWO","ROKU","LYV","CHTR","TMUS",
+"CSX","UNP","CP","CNI","UPS","DAL","UAL","LUV","AAL","EXPE",
+"ABNB","UBER","LYFT","RCL","CCL","NCLH","H","HLT","MGM","LVS",
+"WYNN","MAR","BKNG","F","STLA","RIVN","LCID","NIO","XPEV","LI",
+"GM","TSLA","FSLR","ENPH","SEDG","NEE","DUK","SO","AEP","ED",
+"XEL","PEG","D","EIX","PCG","SRE","WEC","CMS","ATO","NI",
+"OKE","WMB","KMI","ET","EPD","MPLX","PAA","TRGP","ENB","TRP",
+"SLB","HAL","BKR","VLO","PSX","MPC","HES","COP","OXY","PXD",
+"EOG","DVN","FANG","APA","MRO","AR","RRC","SWN","CHK","EQNR",
+"CVX","XOM","BP","SHEL","TTE","PTR","SNP","EC","ENI","YPF",
+"BA","LMT","NOC","GD","RTX","TDG","HEI","TXT","SPR","GE",
+"CAT","DE","CMI","PCAR","OSK","AGCO","PWR","JCI","EMR","ETN",
+"MMM","HON","ROK","IR","XYL","AWK","AOS","MAS","FBHS","WHR",
+"HD","LOW","TSCO","BBY","RH","W","AMZN","EBAY","ETSY","SHOP",
+"CVS","WBA","CI","UNH","HUM","ELV","CNC","MOH","PFE","MRK",
+"LLY","BMY","GILD","REGN","VRTX","BIIB","AMGN","ILMN","DHR","TMO",
+"ISRG","SYK","EW","BSX","ZBH","ALGN","XRAY","HOLX","STE","RMD",
+"ABT","MDT","BDX","PKI","MTD","WAT","A","BIO","TECH","IDXX",
+"PANW","FTNT","CRWD","ZS","OKTA","SPLK","DDOG","SNOW","MDB","NET",
+"MSFT","ORCL","SAP","ADBE","CRM","INTU","NOW","TEAM","WDAY","PAYC",
+"V","MA","AXP","DFS","COF","SYF","PYPL","SQ","AFRM","HOOD",
+"JPM","BAC","WFC","C","GS","MS","USB","PNC","TFC","BK",
+"BLK","STT","NTRS","SCHW","AMP","BEN","IVZ","TROW","APO","KKR",
+"PLD","AMT","CCI","EQIX","PSA","SPG","O","WELL","VTR","EQR",
+"AVB","UDR","ESS","MAA","CPT","ARE","BXP","SLG","VNO","HST",
+"DLR","IRM","SBAC","WY","PCH","RYN","LEN","DHI","PHM","TOL",
+"NVR","HD","LOW","TSCO","WMT","COST","TGT","DG","DLTR","BJ",
+"KO","PEP","MNST","KDP","CELH","TAP","STZ","BF.B","MO","PM",
+"BTI","UL","PG","CL","KMB","CHD","EL","COTY","IPAR","NKE",
+"ADDYY","LULU","UAA","VFC","RL","PVH","TIF","SIG","JWN","M",
+"FDX","UPS","CHRW","JBHT","ODFL","SAIA","XPO","R","KNX","SNDR",
+"CSX","NSC","UNP","CP","CNI","KSU","TMUS","VZ","T","CMCSA",
+"DIS","NFLX","ROKU","PARA","WBD","FOXA","LYV","IMAX","AMCX","SPOT",
+"GOOGL","META","SNAP","PINS","TWTR","BIDU","BABA","JD","PDD","TCEHY",
+"SHOP","MELI","SE","GLBE","WIX","SQ","PYPL","AFRM","UPST","SOFI",
+"NVDA","AMD","INTC","QCOM","TXN","MU","LRCX","KLAC","AMAT","ASML",
+"TSM","GFS","ON","WOLF","MRVL","SWKS","QRVO","AVGO","ADI","NXPI",
+"FSLR","ENPH","SEDG","RUN","SPWR","NEE","DUK","SO","AEP","ED",
+"XEL","PEG","D","EIX","PCG","SRE","WEC","CMS","ATO","NI",
+"BRK.A","BRK.B","MKL","AIG","MET","PRU","LNC","UNM","GL","PFG",
+"HIG","ALL","TRV","CB","AFL","PGR","CINF","WRB","RE","RNR",
+"SPGI","MSCI","ICE","NDAQ","CME","MCO","FDS","MKTX","TW","BR",
+"PANW","CRWD","ZS","FTNT","OKTA","DDOG","SNOW","MDB","NET","SPLK",
+"ORCL","SAP","ADBE","CRM","INTU","NOW","TEAM","WDAY","PAYC","MSFT",
+"AMZN","SHOP","MELI","SE","WMT","TGT","COST","DG","DLTR","BJ",
+"TSLA","RIVN","LCID","NIO","XPEV","LI","F","GM","STLA","HMC",
+"BA","LMT","NOC","RTX","GD","TDG","HEI","TXT","SPR","GE",
+"XOM","CVX","COP","OXY","PXD","EOG","DVN","FANG","MRO","APA",
+"SLB","HAL","BKR","VLO","PSX","MPC","HES","KMI","WMB","OKE",
+"JPM","BAC","WFC","C","GS","MS","USB","PNC","TFC","BK",
+"V","MA","AXP","DFS","COF","SYF","PYPL","SQ","AFRM","HOOD",
+"KO","PEP","MNST","KDP","CELH","STZ","BF.B","TAP","MO","PM",
+"PG","CL","KMB","CHD","EL","COTY","IPAR","UL","NKE","LULU",
+"HD","LOW","TSCO","WMT","COST","TGT","DG","DLTR","BJ","BBY",
+"CAT","DE","CMI","PCAR","OSK","AGCO","PWR","JCI","EMR","ETN",
+"MMM","HON","ROK","IR","XYL","AWK","AOS","MAS","FBHS","WHR",
+"PLD","AMT","CCI","EQIX","PSA","SPG","O","WELL","VTR","EQR",
+"AVB","UDR","ESS","MAA","CPT","ARE","BXP","SLG","VNO","HST",
+"LEN","DHI","PHM","TOL","NVR","HD","LOW","TSCO","WMT","COST",
+"DIS","NFLX","ROKU","PARA","WBD","FOXA","LYV","IMAX","AMCX","SPOT",
+"GOOGL","META","SNAP","PINS","TWTR","BIDU","BABA","JD","PDD","TCEHY"
 ]
-
 
 # ----------------- دوال المساعدة -----------------
 def normalize(df):
@@ -101,7 +174,7 @@ def load_spy_regime():
     return raw["Bull"]
 
 
-# ----------------- بناء الإشارات المحسّنة -----------------
+# ----------------- بناء الإشارات المحسّنة – Balanced V2 -----------------
 def build_signals(df, spy_bull):
     df["Hammer"] = detect_hammer(df)
     df["Rsi"] = compute_rsi(df["Close"])
@@ -110,25 +183,29 @@ def build_signals(df, spy_bull):
     df["Sma20"] = df["Close"].rolling(20, min_periods=1).mean()
     df["Vol20"] = df["Volume"].rolling(20, min_periods=1).mean()
 
-    # ترند محسّن
-    df["Trend"] = df["Sma10"] < df["Sma20"]
+    # ترند محسّن: السعر تحت Sma20 + Sma10 تحت Sma20
+    df["Trend"] = (df["Sma10"] < df["Sma20"]) & (df["Close"] < df["Sma20"])
 
-    # تأكيد محسّن
-    df["Confirm"] = df["Close"].shift(-1) > df["Close"]
+    # تأكيد محسّن: إغلاق الغد أعلى من افتتاح اليوم
+    df["Confirm"] = df["Close"].shift(-1) > df["Open"]
 
-    # قوة الشمعة
+    # قوة الشمعة (ATR أخف من V1)
     candle_range = df["High"] - df["Low"]
-    strong_range = candle_range > 0.40 * df["Atr14"]
+    strong_range = candle_range > 0.35 * df["Atr14"]
+
+    # فلتر تقلبات: نتجنب الفترات الميتة
+    df["VolFilter"] = df["Atr14"] > df["Atr14"].rolling(50, min_periods=1).mean()
 
     df["Bull"] = spy_bull.reindex(df.index).fillna(False)
 
-    # الإشارة النهائية المتوازنة
+    # الإشارة النهائية Balanced V2
     df["Signal"] = (
         df["Hammer"]
         & df["Trend"]
         & df["Confirm"]
-        & df["Rsi"].between(18, 62)
-        & (df["Volume"] > 0.6 * df["Vol20"])
+        & df["VolFilter"]
+        & df["Rsi"].between(17, 65)
+        & (df["Volume"] > 0.55 * df["Vol20"])
         & df["Bull"]
         & strong_range
     )
@@ -267,10 +344,10 @@ def build_portfolio_equity(all_trades_df):
 
 
 # ----------------- واجهة Streamlit -----------------
-st.set_page_config(page_title="Hammer Backtest – Balanced Edition", layout="wide")
+st.set_page_config(page_title="Hammer Backtest – Balanced V2", layout="wide")
 
-st.title("Hammer Backtest – Balanced High‑Performance Edition")
-st.write("نسخة متوازنة: Win Rate عالي + عدد صفقات أعلى + عائد تراكمي أقوى.")
+st.title("Hammer Backtest – Balanced High‑Performance Edition V2")
+st.write("نسخة متوازنة V2: Win Rate قوي + عدد صفقات أعلى + عائد تراكمي أقوى، على 600 سهم أوبشِنابل.")
 
 with st.spinner("جاري تحميل بيانات SPY..."):
     spy_regime = load_spy_regime()
@@ -279,7 +356,7 @@ st.success("تم تحميل بيانات SPY بنجاح.")
 selected_tickers = st.multiselect(
     "اختر الأسهم:",
     LIQUID_TICKERS,
-    default=LIQUID_TICKERS[:10],
+    default=LIQUID_TICKERS[:50],  # مثلاً أول 50 بشكل افتراضي
 )
 
 run_button = st.button("ابدأ الباك تست")
