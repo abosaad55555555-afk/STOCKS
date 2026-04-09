@@ -235,7 +235,10 @@ def simulate_trades(df, ticker):
         if pd.isna(entry_open) or pd.isna(exit_close):
             continue
 
-        ret = (exit_close - entry_open) / entry_open
+       leverage = 3.0  # تقريب لحساسية الأوبشن
+ret = ((exit_close - entry_open) / entry_open) * leverage
+ret = max(ret, -1.0)  # ما نخلي الخسارة تتعدى -100%
+
 
         trades.append(
             {
