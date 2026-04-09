@@ -217,8 +217,6 @@ def build_signals(df, spy_bull):
 
     return df
 
-
-# ----------------- صفقات: دخول Next Open خروج Same Close -----------------
 def simulate_trades(df, ticker):
     trades = []
     signal_dates = df.index[df["Signal"]].tolist()
@@ -235,10 +233,14 @@ def simulate_trades(df, ticker):
         if pd.isna(entry_open) or pd.isna(exit_close):
             continue
 
-       leverage = 3.0 
-ret = ((exit_close - entry_open) / entry_open) * leverage
-ret = max(ret, -1.0) 
+        # -----------------------------
+        #   محاكاة شراء Call Options
+        # -----------------------------
+        leverage = 3.0  # قوة حركة الأوبشن (تقريب)
+        ret = ((exit_close - entry_open) / entry_open) * leverage
 
+        # لا نسمح بخسارة تتجاوز -100%
+        ret = max(ret, -1.0)
 
         trades.append(
             {
@@ -260,43 +262,6 @@ ret = max(ret, -1.0)
     trades_df.reset_index(drop=True, inplace=True)
     return trades_df
 
-
-def summarize_trades(trades_df):
-    if trades_df.empty:
-        return {
-            "trades": 0,
-            "win_rate": 0.0,
-            "avg_return": 0.0,
-            "max_gain": 0.0,
-            "max_loss": 0.0,
-            "cum_return": 0.0,
-        }
-
-    n = len(trades_df)
-    wins = (trades_df["return_pct"] > 0).sum()
-    win_rate = wins / n * 100.0
-    avg_return = trades_df["return_pct"].mean()
-    max_gain = trades_df["return_pct"].max()
-    max_loss = trades_df["return_pct"].min()
-    cum_return = (1 + trades_df["return_pct"] / 100.0).prod() - 1
-
-    return {
-        "trades": n,
-        "win_rate": win_rate,
-        "avg_return": avg_return,
-        "max_gain": max_gain,
-        "max_loss": max_loss,
-        "cum_return": cum_return * 100.0,
-    }
-
-
-def equity_curve_from_trades(trades_df):
-    if trades_df.empty:
-        return pd.Series(dtype=float)
-
-    eq = (1 + trades_df["return_pct"] / 100.0).cumprod()
-    eq.index = trades_df["exit_date"]
-    return eq
 
 
 # ----------------- باك تست سهم واحد -----------------
