@@ -40,12 +40,11 @@ def plot_equity_curve(equity, title):
         return
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=equity.index, y=equity.values,
-                             mode="lines", line=dict(color="#FFD700", width=3)))
-    fig.update_layout(template="plotly_dark", paper_bgcolor="#000000",
-                      plot_bgcolor="#000000", font=dict(color="white"),
+                             mode='lines', line=dict(color='#FFD700', width=3)))
+    fig.update_layout(template='plotly_dark', paper_bgcolor='#000000',
+                      plot_bgcolor='#000000', font=dict(color='white'),
                       height=350, title=title)
     st.plotly_chart(fig, use_container_width=True)
-
 def normalize(df):
     cols = ["Open","High","Low","Close","Volume"]
     if isinstance(df.columns, pd.MultiIndex):
@@ -77,16 +76,43 @@ def detect_hammer(df):
     o, c, h, l = df["Open"], df["Close"], df["High"], df["Low"]
     body = (c - o).abs()
     candle_range = h - l
-    lower_shadow = (o.where(o < c, c) - l)
-    upper_shadow = (h - o.where(o > c, c))
-    cond_basic = (
+    lower_shadow = o.where(o < c, c) - l
+    upper_shadow = h - o.where(o > c, c)
+    cond = (
         (candle_range > 0) &
         (body <= candle_range * 0.30) &
         (lower_shadow >= candle_range * 0.55) &
         (upper_shadow <= candle_range * 0.20)
     )
-    return cond_basic & (c >= o)
+    return cond
 
+def detect_inverted_hammer(df):
+    o, c, h, l = df["Open"], df["Close"], df["High"], df["Low"]
+    body = (c - o).abs()
+    candle_range = h - l
+    upper_shadow = h - o.where(o > c, c)
+    lower_shadow = o.where(o < c, c) - l
+    cond = (
+        (candle_range > 0) &
+        (body <= candle_range * 0.30) &
+        (upper_shadow >= body * 2.0) &
+        (lower_shadow <= body * 0.5)
+    )
+    return cond
+
+def detect_pinbar(df):
+    o, c, h, l = df["Open"], df["Close"], df["High"], df["Low"]
+    body = (c - o).abs()
+    candle_range = h - l
+    lower_shadow = o.where(o < c, c) - l
+    upper_shadow = h - o.where(o > c, c)
+    cond = (
+        (candle_range > 0) &
+        (body <= candle_range * 0.30) &
+        (lower_shadow >= body * 2.5) &
+        (upper_shadow <= body * 1.0)
+    )
+    return cond
 def load_spy_regime():
     raw = yf.download("SPY", start=START, auto_adjust=False, progress=False)
     if raw is None or raw.empty:
@@ -100,30 +126,61 @@ def load_spy_regime():
     return raw["Bull"].ffill().bfill()
 
 def build_signals(df, spy_bull):
+
     df["Hammer"] = detect_hammer(df)
+    df["InvHammer"] = detect_inverted_hammer(df)
+    df["PinBar"] = detect_pinbar(df)
+
+    df["Pattern"] = df["Hammer"] | df["InvHammer"] | df["PinBar"]
+
     df["Rsi"] = compute_rsi(df["Close"])
     df["Atr14"] = compute_atr(df)
+
+    df["Sma5"] = df["Close"].rolling(5).mean()
     df["Sma10"] = df["Close"].rolling(10).mean()
     df["Sma20"] = df["Close"].rolling(20).mean()
     df["Sma50"] = df["Close"].rolling(50).mean()
+
     df["Vol20"] = df["Volume"].rolling(20).mean()
-    df["Trend"] = (df["Sma10"] < df["Sma20"]) & (df["Sma20"] < df["Sma50"])
-    df["Confirm"] = df["Close"].shift(-1) > df["High"]
-    df["VolFilter"] = df["Atr14"] > df["Atr14"].rolling(50).mean()
-    df["NoSpike"] = (df["High"] - df["Low"]) < df["Atr14"] * 3
+    df["Vol5"] = df["Volume"].rolling(5).mean()
+
+    df["Trend"] = (
+        (df["Sma5"] < df["Sma10"]) &
+        (df["Sma10"] < df["Sma20"]) &
+        (df["Sma20"] < df["Sma50"])
+    )
+
+    df["VolSpike"] = df["Volume"] > df["Vol20"] * 1.2
+    df["VolConfirm"] = df["Vol5"] > df["Vol20"] * 0.7
+    df["VolStable"] = df["Vol20"] > df["Vol20"].rolling(50).mean() * 0.6
+    df["VolumeFilter"] = df["VolSpike"] & df["VolConfirm"] & df["VolStable"]
+
+    df["ATR_Adaptive"] = df["Atr14"] > df["Atr14"].rolling(50).mean() * 0.8
+
+    df["NoSpike"] = (df["High"] - df["Low"]) < df["Atr14"] * 2.5
+    df["NoGap"] = (df["Open"] - df["Close"].shift(1)).abs() < df["Atr14"] * 1.8
+
     df["Bull"] = spy_bull.reindex(df.index).fillna(False)
+
+    candle_range = df["High"] - df["Low"]
+    df["StrongRange"] = candle_range > df["Atr14"] * 0.35
+
+    df["Confirm"] = df["Close"].shift(-1) > df["High"] * 1.002
+
     df["Signal"] = (
-        df["Hammer"] &
+        df["Pattern"] &
         df["Trend"] &
-        df["Confirm"] &
-        df["VolFilter"] &
+        df["VolumeFilter"] &
+        df["ATR_Adaptive"] &
         df["NoSpike"] &
-        df["Rsi"].between(15, 68) &
-        (df["Volume"] > 0.5 * df["Vol20"]) &
+        df["NoGap"] &
+        df["StrongRange"] &
+        df["Confirm"] &
+        df["Rsi"].between(10, 70) &
         df["Bull"]
     )
-    return df
 
+    return df
 def simulate_trades(df, ticker, mode="stock"):
     trades = []
     for sig_date in df.index[df["Signal"]]:
@@ -133,6 +190,7 @@ def simulate_trades(df, ticker, mode="stock"):
         entry_date = df.index[pos + 1]
         entry_open = df.loc[entry_date, "Open"]
         exit_close = df.loc[entry_date, "Close"]
+
         if mode == "call_3x":
             ret = ((exit_close - entry_open) / entry_open) * 3
             ret = max(ret, -1)
@@ -141,6 +199,7 @@ def simulate_trades(df, ticker, mode="stock"):
             ret = max(ret, -1)
         else:
             ret = (exit_close - entry_open) / entry_open
+
         trades.append({
             "ticker": ticker,
             "entry_date": entry_date,
@@ -149,6 +208,7 @@ def simulate_trades(df, ticker, mode="stock"):
             "exit_price": exit_close,
             "return_pct": ret * 100
         })
+
     return pd.DataFrame(trades)
 
 def summarize_trades(df):
@@ -177,7 +237,7 @@ st.set_page_config(page_title="HAMMER PRO", layout="wide")
 load_custom_css()
 
 st.markdown("<h1 style='text-align:center;'>HAMMER PRO</h1>", unsafe_allow_html=True)
-st.markdown("<h3 style='text-align:center;'>Premium Hammer Backtesting Engine</h3>", unsafe_allow_html=True)
+st.markdown("<h3 style='text-align:center;'>Aggressive V3 – Hammer + Inverted Hammer + Pin Bar</h3>", unsafe_allow_html=True)
 st.write("---")
 
 mode_label = st.sidebar.selectbox("Execution Mode", ["Stocks","Call 3x","Call 5x"])
@@ -198,6 +258,7 @@ if run:
         if df_raw.empty:
             st.warning(f"No data for {t}")
             continue
+
         df = normalize(df_raw)
         df = build_signals(df, spy)
         trades = simulate_trades(df, t, mode)
