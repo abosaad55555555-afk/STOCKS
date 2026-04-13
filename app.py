@@ -6,14 +6,6 @@ import plotly.graph_objects as go
 
 START = "2010-01-01"
 
-LIQUID_TICKERS = [
-    "AAPL","MSFT","AMZN","NVDA","META","GOOGL","GOOG","TSLA","AVGO","BRK.B",
-    "JPM","V","MA","HD","PG","XOM","UNH","LLY","JNJ","COST","BAC",
-    "WMT","MRK","PEP","KO","ABBV","CVX","ADBE","CRM","NFLX","ACN",
-    "LIN","MCD","AMD","TMO","WFC","INTC","TXN","MS","PM","NEE",
-    "UNP","IBM","HON","AMGN","LOW","CAT","ORCL","GS","SPGI","BLK"
-]
-
 def load_custom_css():
     css = """
     <style>
@@ -118,21 +110,26 @@ def load_spy_regime():
     if raw is None or raw.empty:
         idx = pd.date_range(start=START, periods=5000, freq="D")
         return pd.Series(False, index=idx)
+
     raw.columns = raw.columns.get_level_values(0)
     raw.columns = [str(c).capitalize() for c in raw.columns]
     raw = raw.apply(pd.to_numeric, errors="coerce").dropna(subset=["Close"])
+
     raw["Sma200"] = raw["Close"].rolling(200, min_periods=1).mean()
     raw["Bull"] = raw["Close"] > raw["Sma200"]
+
     return raw["Bull"].ffill().bfill()
+
 
 def build_signals(df, spy_bull):
 
+    # Patterns
     df["Hammer"] = detect_hammer(df)
     df["InvHammer"] = detect_inverted_hammer(df)
     df["PinBar"] = detect_pinbar(df)
-
     df["Pattern"] = df["Hammer"] | df["InvHammer"] | df["PinBar"]
 
+    # Indicators
     df["Rsi"] = compute_rsi(df["Close"])
     df["Atr14"] = compute_atr(df)
 
@@ -144,29 +141,37 @@ def build_signals(df, spy_bull):
     df["Vol20"] = df["Volume"].rolling(20).mean()
     df["Vol5"] = df["Volume"].rolling(5).mean()
 
+    # Trend Filter
     df["Trend"] = (
         (df["Sma5"] < df["Sma10"]) &
         (df["Sma10"] < df["Sma20"]) &
         (df["Sma20"] < df["Sma50"])
     )
 
+    # Volume Filters
     df["VolSpike"] = df["Volume"] > df["Vol20"] * 1.2
     df["VolConfirm"] = df["Vol5"] > df["Vol20"] * 0.7
     df["VolStable"] = df["Vol20"] > df["Vol20"].rolling(50).mean() * 0.6
     df["VolumeFilter"] = df["VolSpike"] & df["VolConfirm"] & df["VolStable"]
 
+    # ATR Filter
     df["ATR_Adaptive"] = df["Atr14"] > df["Atr14"].rolling(50).mean() * 0.8
 
+    # Candle Stability
     df["NoSpike"] = (df["High"] - df["Low"]) < df["Atr14"] * 2.5
     df["NoGap"] = (df["Open"] - df["Close"].shift(1)).abs() < df["Atr14"] * 1.8
 
+    # SPY Regime
     df["Bull"] = spy_bull.reindex(df.index).fillna(False)
 
+    # Candle Strength
     candle_range = df["High"] - df["Low"]
     df["StrongRange"] = candle_range > df["Atr14"] * 0.35
 
+    # Confirmation
     df["Confirm"] = df["Close"].shift(-1) > df["High"] * 1.002
 
+    # Final Signal
     df["Signal"] = (
         df["Pattern"] &
         df["Trend"] &
@@ -187,6 +192,7 @@ def simulate_trades(df, ticker, mode="stock"):
         pos = df.index.get_loc(sig_date)
         if pos + 1 >= len(df):
             continue
+
         entry_date = df.index[pos + 1]
         entry_open = df.loc[entry_date, "Open"]
         exit_close = df.loc[entry_date, "Close"]
@@ -211,12 +217,15 @@ def simulate_trades(df, ticker, mode="stock"):
 
     return pd.DataFrame(trades)
 
+
 def summarize_trades(df):
     if df.empty:
         return {"trades":0,"win_rate":0,"avg_return":0,"max_gain":0,"max_loss":0,"cum_return":0}
+
     n = len(df)
     wins = (df["return_pct"] > 0).sum()
     cum = (1 + df["return_pct"]/100).prod() - 1
+
     return {
         "trades": n,
         "win_rate": wins/n*100,
@@ -226,12 +235,14 @@ def summarize_trades(df):
         "cum_return": cum*100
     }
 
+
 def equity_curve(df):
     if df.empty:
         return pd.Series(dtype=float)
     eq = (1 + df["return_pct"]/100).cumprod()
     eq.index = df["exit_date"]
     return eq
+
 
 st.set_page_config(page_title="HAMMER PRO", layout="wide")
 load_custom_css()
@@ -240,13 +251,24 @@ st.markdown("<h1 style='text-align:center;'>HAMMER PRO</h1>", unsafe_allow_html=
 st.markdown("<h3 style='text-align:center;'>Aggressive V3 – Hammer + Inverted Hammer + Pin Bar</h3>", unsafe_allow_html=True)
 st.write("---")
 
+
+# Execution Mode
 mode_label = st.sidebar.selectbox("Execution Mode", ["Stocks","Call 3x","Call 5x"])
 mode = "stock" if mode_label=="Stocks" else ("call_3x" if mode_label=="Call 3x" else "call_5x")
 
-tickers = st.sidebar.multiselect("Select Tickers", LIQUID_TICKERS, default=LIQUID_TICKERS[:10])
+
+# -------------------------------
+# هنا سيتم وضع قوائم الأسهم الضخمة (800 سهم)
+# أنت ستضيفها لاحقاً بعد أن أرسل لك الجزء 3/3 من القوائم
+# -------------------------------
+
+tickers = st.sidebar.multiselect("Select Tickers", ["AAPL","MSFT","NVDA","TSLA"])  # مؤقتاً
+
+
 run = st.sidebar.button("Run Backtest")
 
 spy = load_spy_regime()
+
 
 if run:
     all_trades = []
@@ -254,6 +276,7 @@ if run:
 
     for t in tickers:
         st.subheader(t)
+
         df_raw = yf.download(t, start=START, auto_adjust=False, progress=False)
         if df_raw.empty:
             st.warning(f"No data for {t}")
@@ -261,6 +284,7 @@ if run:
 
         df = normalize(df_raw)
         df = build_signals(df, spy)
+
         trades = simulate_trades(df, t, mode)
         summary = summarize_trades(trades)
         eq = equity_curve(trades)
@@ -282,6 +306,7 @@ if run:
     if all_trades:
         st.write("---")
         st.subheader("Portfolio Summary")
+
         port = pd.concat(all_trades)
         port_sum = summarize_trades(port)
         port_eq = equity_curve(port)
