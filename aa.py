@@ -24,17 +24,31 @@ def ai_v3_pro(df, lookback=300, decay=0.65):
     df["ATR_Norm"] = df["Range"] / df["ATR"]
     df["Vol_Norm"] = df["Volume"] / df["Volume"].rolling(20).mean()
 
-    # Regime (trend) – daily
+    # ============================
+    # Regime Detection (Daily)
+    # ============================
     df["MA_Trend"] = df["Close"].rolling(50).mean()
+
+    # FIX: Align index before comparing
+    df["MA_Trend"] = df["MA_Trend"].reindex(df.index, method="ffill")
+
     df["Regime"] = np.where(df["Close"] > df["MA_Trend"], 1, -1)
 
-    # MTF (weekly)
+    # ============================
+    # MTF Reinforcement (Weekly)
+    # ============================
     weekly_ma = df["Close"].resample("W").last().rolling(10).mean()
+
+    # FIX: Align weekly MA to daily index
     df["MTF_MA"] = weekly_ma.reindex(df.index, method="ffill")
+
     df["MTF_Signal"] = np.where(df["Close"] > df["MTF_MA"], 1, -1)
 
     preds = []
 
+    # ============================
+    # Neural Similarity Engine
+    # ============================
     for i in range(len(df)):
         if i < lookback:
             preds.append(0.0)
@@ -78,10 +92,7 @@ def ai_v3_pro(df, lookback=300, decay=0.65):
         sims = np.array(sims)
         moves = np.array(moves)
 
-        if sims.sum() == 0:
-            pred = 0.0
-        else:
-            pred = (sims * moves).sum() / sims.sum()
+        pred = (sims * moves).sum() / sims.sum() if sims.sum() > 0 else 0.0
 
         # Regime + MTF reinforcement
         pred *= (1 + 0.05 * df["Regime"].iloc[i])
@@ -94,18 +105,14 @@ def ai_v3_pro(df, lookback=300, decay=0.65):
 
 
 # ================================
-# 2) Auto‑Tune thresholds from AI_PredMove
+# 2) Auto‑Tune thresholds
 # ================================
 def auto_tune(df, window=200):
     df = df.copy()
 
-    # Magnitude of predicted move
     df["PredAbs"] = df["AI_PredMove"].abs()
-
-    # Rolling volatility of prediction
     vol = df["PredAbs"].rolling(window).std()
 
-    # Threshold = k * volatility (adaptive)
     k = 0.7
     df["Thr"] = (vol * k).fillna(vol.mean() * k if not np.isnan(vol.mean()) else 0.0)
 
@@ -113,7 +120,7 @@ def auto_tune(df, window=200):
 
 
 # ================================
-# 3) Backtest using AI_PredMove + Auto‑Tune
+# 3) Backtest
 # ================================
 def backtest_pro(df):
     df = df.copy()
@@ -161,21 +168,17 @@ def plot_equity(df, title="AI V3 – Equity Curve"):
 
 
 # ================================
-# 6) Full example: MSFT, 1D
+# 6) Full example
 # ================================
 if __name__ == "__main__":
     ticker = "MSFT"
     df = yf.download(ticker, period="5y", interval="1d")
 
-    # Ensure proper columns
     df = df[["Open", "High", "Low", "Close", "Volume"]].dropna()
 
     df = ai_v3_pro(df)
     df = auto_tune(df)
     df = backtest_pro(df)
 
-    stats = performance(df)
-    print(f"Ticker: {ticker}")
-    print(stats)
-
-    plot_equity(df, title=f"AI V3 – Equity Curve ({ticker})")
+    print(performance(df))
+    plot_equity(df)
