@@ -4,99 +4,63 @@ import numpy as np
 import yfinance as yf
 import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="AI V3 PRO", layout="wide")
+st.set_page_config(page_title="AI V3 LITE", layout="wide")
 
 
 # ============================
-# AI V3 FAST ENGINE
+# AI ENGINE (SAFE)
 # ============================
-def ai_v3_fast(df, lookback=50):
+def ai_engine(df):
     df = df.copy()
 
-    if len(df) <= lookback + 5:
-        df["AI_PredMove"] = 0.0
-        return df
+    # simple features
+    body = (df["Close"] - df["Open"]).abs().to_numpy()
+    range_ = (df["High"] - df["Low"]).to_numpy()
+    dir_ = np.sign(df["Close"] - df["Open"]).to_numpy()
 
-    df["Range"] = df["High"] - df["Low"]
-    df["Body"] = (df["Close"] - df["Open"]).abs()
-    df["BodyPct"] = df["Body"] / df["Range"].replace(0, np.nan)
-    df["Dir"] = np.sign(df["Close"] - df["Open"])
-    df["ATR"] = df["Range"].rolling(14).mean()
-    df["ATR_Norm"] = df["Range"] / df["ATR"]
-    df["Vol_Norm"] = df["Volume"] / df["Volume"].rolling(20).mean()
+    # avoid division by zero
+    range_[range_ == 0] = 1e-9
 
-    features = df[["BodyPct", "Dir", "ATR_Norm", "Vol_Norm"]].fillna(0).values
-    pred = np.zeros(len(df))
+    body_pct = body / range_
 
-    for i in range(lookback, len(df)):
-        window = features[i - lookback:i]
-        cur = features[i]
+    # prediction = weighted body * direction
+    pred = body_pct * dir_
 
-        sim = 1 - np.mean(np.abs(window - cur), axis=1)
-        sim = np.clip(sim, 0, 1)
+    # boost
+    pred = pred * 3
 
-        moves = (
-            df["Close"].values[i - lookback + 1:i + 1]
-            - df["Open"].values[i - lookback + 1:i + 1]
-        )
-
-        w_sum = np.sum(sim)
-        pred[i] = np.sum(sim * moves) / (w_sum + 1e-9)
-
-    df["AI_PredMove"] = pred * 5
+    df["AI_Pred"] = pred
     return df
 
 
 # ============================
-# AUTO‑TUNE
-# ============================
-def auto_tune(df, window=50):
-    df = df.copy()
-    df["PredAbs"] = df["AI_PredMove"].abs()
-    vol = df["PredAbs"].rolling(window).std()
-
-    thr = vol.fillna(vol.mean() if not np.isnan(vol.mean()) else 0.0001)
-    thr = thr.replace(0, 0.0001)
-
-    df["Thr"] = thr * 0.5
-    return df
-
-
-# ============================
-# BACKTEST — PURE NUMPY SAFE VERSION
+# BACKTEST (SUPER SAFE)
 # ============================
 def backtest(df):
     df = df.copy()
 
     closes = df["Close"].to_numpy()
-    pred = df["AI_PredMove"].to_numpy()
-    thr = df["Thr"].to_numpy()
+    pred = df["AI_Pred"].to_numpy()
 
     n = len(df)
 
-    # --- Trend (manual MA) ---
+    # --- Trend (simple MA 10) ---
     trend = np.zeros(n)
     for i in range(n):
-        start = max(0, i - 49)
+        start = max(0, i - 9)
         trend[i] = closes[start:i+1].mean()
 
     # --- TrendSignal ---
     trend_signal = np.where(closes > trend, 1, -1)
 
     # --- Signals ---
-    signal = np.zeros(n)
-    signal[pred > thr] = 1
-    signal[pred < -thr] = -1
+    signal = np.where(pred > 0, 1, -1)
     signal = signal * trend_signal
-
-    # fallback
-    if np.sum(np.abs(signal)) == 0 and np.sum(np.abs(pred)) != 0:
-        signal = np.sign(pred)
 
     # --- SAFE RETURNS ---
     returns = np.zeros(n)
     for i in range(1, n):
-        if closes[i-1] == 0:
+        if closes[i-1] == 0 or np.isnan(closes[i]) or np.isnan(closes[i-1]):
             returns[i] = 0
         else:
             returns[i] = (closes[i] - closes[i-1]) / closes[i-1]
@@ -108,7 +72,6 @@ def backtest(df):
 
     equity = np.cumprod(1 + strategy)
 
-    # merge back into df
     df["Trend"] = trend
     df["TrendSignal"] = trend_signal
     df["Signal"] = signal
@@ -123,14 +86,6 @@ def backtest(df):
 # PERFORMANCE
 # ============================
 def performance(df):
-    if "Equity" not in df or df["Equity"].dropna().empty:
-        return {
-            "Total Return %": 0,
-            "Win Rate %": 0,
-            "Max Drawdown %": 0,
-            "Note": "No equity data / no trades generated."
-        }
-
     total_return = df["Equity"].iloc[-1] - 1
     win_rate = (df["Strategy"] > 0).mean()
     max_dd = (df["Equity"].cummax() - df["Equity"]).max()
@@ -145,10 +100,9 @@ def performance(df):
 # ============================
 # PLOT EQUITY
 # ============================
-def plot_equity(df, title="AI V3 FAST – Equity Curve"):
+def plot_equity(df):
     fig, ax = plt.subplots(figsize=(10, 4))
-    ax.plot(df.index, df["Equity"], label="Strategy Equity")
-    ax.set_title(title)
+    ax.plot(df.index, df["Equity"], label="Equity")
     ax.grid(True)
     ax.legend()
     return fig
@@ -157,13 +111,13 @@ def plot_equity(df, title="AI V3 FAST – Equity Curve"):
 # ============================
 # STREAMLIT UI
 # ============================
-st.title("🚀 AI V3 FAST – Neural Trading Engine")
+st.title("🚀 AI V3 LITE – Stable Trading Engine")
 
 col1, col2 = st.columns(2)
 with col1:
     ticker = st.text_input("Ticker", "MSFT")
 with col2:
-    period = st.selectbox("Period", ["1y", "3y", "5y", "10y"], index=2)
+    period = st.selectbox("Period", ["1y", "3y", "5y"], index=0)
 
 run = st.button("Run AI Model")
 
@@ -172,15 +126,12 @@ if run:
     df = yf.download(ticker, period=period, interval="1d")
 
     if df.empty:
-        st.error("No data downloaded. Check ticker or period.")
+        st.error("No data downloaded.")
     else:
         df = df[["Open", "High", "Low", "Close", "Volume"]].dropna()
 
-        st.write("Running AI V3 FAST...")
-        df = ai_v3_fast(df)
-
-        st.write("Auto‑Tuning thresholds...")
-        df = auto_tune(df)
+        st.write("Running AI Engine...")
+        df = ai_engine(df)
 
         st.write("Backtesting...")
         df = backtest(df)
@@ -189,7 +140,7 @@ if run:
         st.write(performance(df))
 
         st.subheader("📈 Equity Curve")
-        fig = plot_equity(df, title=f"AI V3 FAST – Equity Curve ({ticker})")
+        fig = plot_equity(df)
         st.pyplot(fig)
 
         st.subheader("📄 Last 50 rows")
