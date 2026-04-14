@@ -63,7 +63,7 @@ def auto_tune(df, window=50):
 
 
 # ============================
-# BACKTEST — PURE NUMPY (NO PANDAS INSERT)
+# BACKTEST — PURE NUMPY SAFE VERSION
 # ============================
 def backtest(df):
     df = df.copy()
@@ -87,17 +87,24 @@ def backtest(df):
     signal = np.zeros(n)
     signal[pred > thr] = 1
     signal[pred < -thr] = -1
-
     signal = signal * trend_signal
 
     # fallback
     if np.sum(np.abs(signal)) == 0 and np.sum(np.abs(pred)) != 0:
         signal = np.sign(pred)
 
+    # --- SAFE RETURNS ---
+    returns = np.zeros(n)
+    for i in range(1, n):
+        if closes[i-1] == 0:
+            returns[i] = 0
+        else:
+            returns[i] = (closes[i] - closes[i-1]) / closes[i-1]
+
     # --- Strategy ---
-    returns = np.concatenate([[0], np.diff(closes) / closes[:-1]])
-    strategy = np.roll(signal, 1) * returns
-    strategy[0] = 0
+    strategy = np.zeros(n)
+    for i in range(1, n):
+        strategy[i] = signal[i-1] * returns[i]
 
     equity = np.cumprod(1 + strategy)
 
