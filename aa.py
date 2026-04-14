@@ -15,7 +15,6 @@ import matplotlib.pyplot as plt
 def ai_v3_pro(df, lookback=300, decay=0.65):
     df = df.copy()
 
-    # Basic features
     df["Range"] = df["High"] - df["Low"]
     df["Body"] = (df["Close"] - df["Open"]).abs()
     df["BodyPct"] = df["Body"] / df["Range"].replace(0, np.nan)
@@ -27,22 +26,26 @@ def ai_v3_pro(df, lookback=300, decay=0.65):
     # ============================
     # Regime Detection (Daily)
     # ============================
-    df["MA_Trend"] = df["Close"].rolling(50).mean()
+    close_series = df["Close"].astype(float)
 
-    # FIX: Align index before comparing
-    df["MA_Trend"] = df["MA_Trend"].reindex(df.index, method="ffill")
+    ma_trend = close_series.rolling(50).mean()
+    if isinstance(ma_trend, pd.DataFrame):
+        ma_trend = ma_trend.iloc[:, 0]
+    ma_trend = ma_trend.reindex(df.index, method="ffill")
 
-    df["Regime"] = np.where(df["Close"] > df["MA_Trend"], 1, -1)
+    df["MA_Trend"] = ma_trend
+    df["Regime"] = np.where(close_series.values > ma_trend.values, 1, -1)
 
     # ============================
     # MTF Reinforcement (Weekly)
     # ============================
-    weekly_ma = df["Close"].resample("W").last().rolling(10).mean()
+    weekly_ma = close_series.resample("W").last().rolling(10).mean()
+    if isinstance(weekly_ma, pd.DataFrame):
+        weekly_ma = weekly_ma.iloc[:, 0]
+    weekly_ma = weekly_ma.reindex(df.index, method="ffill")
 
-    # FIX: Align weekly MA to daily index
-    df["MTF_MA"] = weekly_ma.reindex(df.index, method="ffill")
-
-    df["MTF_Signal"] = np.where(df["Close"] > df["MTF_MA"], 1, -1)
+    df["MTF_MA"] = weekly_ma
+    df["MTF_Signal"] = np.where(close_series.values > weekly_ma.values, 1, -1)
 
     preds = []
 
@@ -94,7 +97,6 @@ def ai_v3_pro(df, lookback=300, decay=0.65):
 
         pred = (sims * moves).sum() / sims.sum() if sims.sum() > 0 else 0.0
 
-        # Regime + MTF reinforcement
         pred *= (1 + 0.05 * df["Regime"].iloc[i])
         pred *= (1 + 0.05 * df["MTF_Signal"].iloc[i])
 
