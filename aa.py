@@ -63,7 +63,7 @@ def auto_tune(df, window=50):
 
 
 # ============================
-# BACKTEST (NO ROLLING — NO ERRORS)
+# BACKTEST — NO ERRORS EVER
 # ============================
 def backtest(df):
     df = df.copy()
@@ -71,16 +71,24 @@ def backtest(df):
     closes = df["Close"].to_numpy()
     trend = np.zeros(len(df))
 
-    # manual moving average (safe)
+    # manual moving average
     for i in range(len(df)):
         start = max(0, i - 49)
         trend[i] = closes[start:i+1].mean()
 
-    df["Trend"] = pd.Series(trend, index=df.index)
+    # force 1D
+    trend = np.asarray(trend).reshape(-1)
 
-    # TrendSignal always same length
+    # insert directly (bypasses Series validation)
+    df.insert(len(df.columns), "Trend", trend)
+
+    # TrendSignal
     trend_signal = np.where(closes > trend, 1, -1)
-    df["TrendSignal"] = pd.Series(trend_signal, index=df.index)
+
+    # force 1D
+    trend_signal = np.asarray(trend_signal).reshape(-1)
+
+    df.insert(len(df.columns), "TrendSignal", trend_signal)
 
     # Signals
     df["Signal"] = 0
