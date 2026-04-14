@@ -63,46 +63,51 @@ def auto_tune(df, window=50):
 
 
 # ============================
-# BACKTEST — NO ERRORS EVER
+# BACKTEST — PURE NUMPY (NO PANDAS INSERT)
 # ============================
 def backtest(df):
     df = df.copy()
 
     closes = df["Close"].to_numpy()
-    trend = np.zeros(len(df))
+    pred = df["AI_PredMove"].to_numpy()
+    thr = df["Thr"].to_numpy()
 
-    # manual moving average
-    for i in range(len(df)):
+    n = len(df)
+
+    # --- Trend (manual MA) ---
+    trend = np.zeros(n)
+    for i in range(n):
         start = max(0, i - 49)
         trend[i] = closes[start:i+1].mean()
 
-    # force 1D
-    trend = np.asarray(trend).reshape(-1)
-
-    # insert directly (bypasses Series validation)
-    df.insert(len(df.columns), "Trend", trend)
-
-    # TrendSignal
+    # --- TrendSignal ---
     trend_signal = np.where(closes > trend, 1, -1)
 
-    # force 1D
-    trend_signal = np.asarray(trend_signal).reshape(-1)
+    # --- Signals ---
+    signal = np.zeros(n)
+    signal[pred > thr] = 1
+    signal[pred < -thr] = -1
 
-    df.insert(len(df.columns), "TrendSignal", trend_signal)
+    signal = signal * trend_signal
 
-    # Signals
-    df["Signal"] = 0
-    df.loc[df["AI_PredMove"] > df["Thr"], "Signal"] = 1
-    df.loc[df["AI_PredMove"] < -df["Thr"], "Signal"] = -1
+    # fallback
+    if np.sum(np.abs(signal)) == 0 and np.sum(np.abs(pred)) != 0:
+        signal = np.sign(pred)
 
-    df["Signal"] = df["Signal"] * df["TrendSignal"]
+    # --- Strategy ---
+    returns = np.concatenate([[0], np.diff(closes) / closes[:-1]])
+    strategy = np.roll(signal, 1) * returns
+    strategy[0] = 0
 
-    if df["Signal"].abs().sum() == 0 and df["AI_PredMove"].abs().sum() != 0:
-        df["Signal"] = np.sign(df["AI_PredMove"])
+    equity = np.cumprod(1 + strategy)
 
-    df["Return"] = df["Close"].pct_change()
-    df["Strategy"] = df["Signal"].shift(1) * df["Return"]
-    df["Equity"] = (1 + df["Strategy"]).cumprod().fillna(1.0)
+    # merge back into df
+    df["Trend"] = trend
+    df["TrendSignal"] = trend_signal
+    df["Signal"] = signal
+    df["Return"] = returns
+    df["Strategy"] = strategy
+    df["Equity"] = equity
 
     return df
 
