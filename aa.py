@@ -10,6 +10,10 @@ st.set_page_config(page_title="AI V3 PRO", layout="wide")
 def ai_v3_fast(df, lookback=50):
     df = df.copy()
 
+    if len(df) <= lookback + 5:
+        df["AI_PredMove"] = 0.0
+        return df
+
     df["Range"] = df["High"] - df["Low"]
     df["Body"] = (df["Close"] - df["Open"]).abs()
     df["BodyPct"] = df["Body"] / df["Range"].replace(0, np.nan)
