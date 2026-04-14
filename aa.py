@@ -7,6 +7,9 @@ import matplotlib.pyplot as plt
 st.set_page_config(page_title="AI V3 PRO", layout="wide")
 
 
+# ============================
+# AI V3 FAST ENGINE
+# ============================
 def ai_v3_fast(df, lookback=50):
     df = df.copy()
 
@@ -40,35 +43,52 @@ def ai_v3_fast(df, lookback=50):
         w_sum = np.sum(sim)
         pred[i] = np.sum(sim * moves) / (w_sum + 1e-9)
 
-    df["AI_PredMove"] = pred * 5  # boost signal
+    df["AI_PredMove"] = pred * 5  # BOOST SIGNAL
     return df
 
 
+# ============================
+# AUTO‑TUNE
+# ============================
 def auto_tune(df, window=50):
     df = df.copy()
     df["PredAbs"] = df["AI_PredMove"].abs()
     vol = df["PredAbs"].rolling(window).std()
-    df["Thr"] = vol.fillna(vol.mean() if not np.isnan(vol.mean()) else 0.0001)
-    df["Thr"] = df["Thr"].replace(0, 0.0001)
-    df["Thr"] = df["Thr"] * 0.5  # reduce threshold
+
+    thr = vol.fillna(vol.mean() if not np.isnan(vol.mean()) else 0.0001)
+    thr = thr.replace(0, 0.0001)
+
+    df["Thr"] = thr * 0.5  # LOWER THRESHOLD
     return df
 
 
+# ============================
+# BACKTEST
+# ============================
 def backtest(df):
     df = df.copy()
 
-    df["Trend"] = df["Close"].rolling(50).mean()
-    df["TrendSignal"] = np.where(df["Close"] > df["Trend"], 1, -1)
+    # ---- FIX TREND ALWAYS SERIES ----
+    trend = df["Close"].rolling(50).mean()
+    if isinstance(trend, pd.DataFrame):
+        trend = trend.iloc[:, 0]
+    trend = trend.reindex(df.index, method="ffill")
 
+    df["Trend"] = trend
+    df["TrendSignal"] = np.where(df["Close"].values > trend.values, 1, -1)
+
+    # ---- SIGNALS ----
     df["Signal"] = 0
     df.loc[df["AI_PredMove"] > df["Thr"], "Signal"] = 1
     df.loc[df["AI_PredMove"] < -df["Thr"], "Signal"] = -1
 
     df["Signal"] = df["Signal"] * df["TrendSignal"]
 
+    # ---- FALLBACK IF NO SIGNALS ----
     if df["Signal"].abs().sum() == 0 and df["AI_PredMove"].abs().sum() != 0:
         df["Signal"] = np.sign(df["AI_PredMove"])
 
+    # ---- RETURNS ----
     df["Return"] = df["Close"].pct_change()
     df["Strategy"] = df["Signal"].shift(1) * df["Return"]
     df["Equity"] = (1 + df["Strategy"]).cumprod().fillna(1.0)
@@ -76,6 +96,9 @@ def backtest(df):
     return df
 
 
+# ============================
+# PERFORMANCE
+# ============================
 def performance(df):
     if "Equity" not in df or df["Equity"].dropna().empty:
         return {
@@ -96,6 +119,9 @@ def performance(df):
     }
 
 
+# ============================
+# PLOT EQUITY
+# ============================
 def plot_equity(df, title="AI V3 FAST – Equity Curve"):
     fig, ax = plt.subplots(figsize=(10, 4))
     ax.plot(df.index, df["Equity"], label="Strategy Equity")
@@ -105,6 +131,9 @@ def plot_equity(df, title="AI V3 FAST – Equity Curve"):
     return fig
 
 
+# ============================
+# STREAMLIT UI
+# ============================
 st.title("🚀 AI V3 FAST – Neural Trading Engine")
 
 col1, col2 = st.columns(2)
