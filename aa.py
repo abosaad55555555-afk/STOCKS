@@ -43,7 +43,7 @@ def ai_v3_fast(df, lookback=50):
         w_sum = np.sum(sim)
         pred[i] = np.sum(sim * moves) / (w_sum + 1e-9)
 
-    df["AI_PredMove"] = pred * 5  # BOOST SIGNAL
+    df["AI_PredMove"] = pred * 5
     return df
 
 
@@ -58,37 +58,37 @@ def auto_tune(df, window=50):
     thr = vol.fillna(vol.mean() if not np.isnan(vol.mean()) else 0.0001)
     thr = thr.replace(0, 0.0001)
 
-    df["Thr"] = thr * 0.5  # LOWER THRESHOLD
+    df["Thr"] = thr * 0.5
     return df
 
 
 # ============================
-# BACKTEST
+# BACKTEST (FINAL FIX)
 # ============================
 def backtest(df):
     df = df.copy()
 
-    # ---- FIX TREND ALWAYS SERIES ----
     trend = df["Close"].rolling(50).mean()
+
     if isinstance(trend, pd.DataFrame):
         trend = trend.iloc[:, 0]
+
     trend = trend.reindex(df.index, method="ffill")
 
     df["Trend"] = trend
-    df["TrendSignal"] = np.where(df["Close"].values > trend.values, 1, -1)
 
-    # ---- SIGNALS ----
+    trend_signal = np.where(df["Close"].values > trend.values, 1, -1)
+    df["TrendSignal"] = trend_signal.flatten()
+
     df["Signal"] = 0
     df.loc[df["AI_PredMove"] > df["Thr"], "Signal"] = 1
     df.loc[df["AI_PredMove"] < -df["Thr"], "Signal"] = -1
 
     df["Signal"] = df["Signal"] * df["TrendSignal"]
 
-    # ---- FALLBACK IF NO SIGNALS ----
     if df["Signal"].abs().sum() == 0 and df["AI_PredMove"].abs().sum() != 0:
         df["Signal"] = np.sign(df["AI_PredMove"])
 
-    # ---- RETURNS ----
     df["Return"] = df["Close"].pct_change()
     df["Strategy"] = df["Signal"].shift(1) * df["Return"]
     df["Equity"] = (1 + df["Strategy"]).cumprod().fillna(1.0)
