@@ -1,9 +1,14 @@
+import streamlit as st
 import pandas as pd
 import numpy as np
 import yfinance as yf
 import matplotlib.pyplot as plt
 
+st.set_page_config(page_title="AI V3 PRO", layout="wide")
 
+# ============================
+# AI V3 FAST ENGINE
+# ============================
 def ai_v3_fast(df, lookback=50):
     df = df.copy()
 
@@ -16,7 +21,6 @@ def ai_v3_fast(df, lookback=50):
     df["Vol_Norm"] = df["Volume"] / df["Volume"].rolling(20).mean()
 
     features = df[["BodyPct", "Dir", "ATR_Norm", "Vol_Norm"]].fillna(0).values
-
     pred = np.zeros(len(df))
 
     for i in range(lookback, len(df)):
@@ -27,7 +31,6 @@ def ai_v3_fast(df, lookback=50):
         sim = np.clip(sim, 0, 1)
 
         moves = df["Close"].values[i - lookback + 1:i + 1] - df["Open"].values[i - lookback + 1:i + 1]
-
         pred[i] = np.sum(sim * moves) / (np.sum(sim) + 1e-9)
 
     df["AI_PredMove"] = pred
@@ -42,7 +45,6 @@ def auto_tune(df):
 
 def backtest(df):
     df = df.copy()
-
     df["Signal"] = 0
     df.loc[df["AI_PredMove"] > df["Thr"], "Signal"] = 1
     df.loc[df["AI_PredMove"] < -df["Thr"], "Signal"] = -1
@@ -50,7 +52,6 @@ def backtest(df):
     df["Return"] = df["Close"].pct_change()
     df["Strategy"] = df["Signal"].shift(1) * df["Return"]
     df["Equity"] = (1 + df["Strategy"]).cumprod().fillna(1)
-
     return df
 
 
@@ -66,20 +67,36 @@ def performance(df):
     }
 
 
-def plot_equity(df):
-    plt.plot(df.index, df["Equity"])
-    plt.title("AI V3 FAST – Equity Curve")
-    plt.grid()
-    plt.show()
+# ============================
+# STREAMLIT UI
+# ============================
+st.title("🚀 AI V3 PRO — Neural Trading Engine")
 
+ticker = st.text_input("Enter Ticker", "MSFT")
+run = st.button("Run AI Model")
 
-if __name__ == "__main__":
-    df = yf.download("MSFT", period="5y", interval="1d")
-    df = df[["Open", "High", "Low", "Close", "Volume"]]
+if run:
+    st.write("Downloading data...")
+    df = yf.download(ticker, period="5y", interval="1d")
+    df = df[["Open", "High", "Low", "Close", "Volume"]].dropna()
 
+    st.write("Running AI V3 FAST...")
     df = ai_v3_fast(df)
+
+    st.write("Auto‑Tuning thresholds...")
     df = auto_tune(df)
+
+    st.write("Backtesting...")
     df = backtest(df)
 
-    print(performance(df))
-    plot_equity(df)
+    st.subheader("📊 Performance")
+    st.write(performance(df))
+
+    st.subheader("📈 Equity Curve")
+    fig, ax = plt.subplots(figsize=(10, 4))
+    ax.plot(df.index, df["Equity"])
+    ax.grid()
+    st.pyplot(fig)
+
+    st.subheader("📄 Signals Table")
+    st.dataframe(df.tail(50))
