@@ -7,6 +7,9 @@ import matplotlib.pyplot as plt
 st.set_page_config(page_title="AI V3 PRO", layout="wide")
 
 
+# ============================
+# AI V3 FAST ENGINE
+# ============================
 def ai_v3_fast(df, lookback=50):
     df = df.copy()
 
@@ -44,6 +47,9 @@ def ai_v3_fast(df, lookback=50):
     return df
 
 
+# ============================
+# AUTO‑TUNE
+# ============================
 def auto_tune(df, window=50):
     df = df.copy()
     df["PredAbs"] = df["AI_PredMove"].abs()
@@ -56,22 +62,28 @@ def auto_tune(df, window=50):
     return df
 
 
+# ============================
+# BACKTEST (SAFE VERSION)
+# ============================
 def backtest(df):
     df = df.copy()
 
-    trend = df["Close"].rolling(50).mean()
+    # --- TREND SAFE ---
+    trend = df["Close"].rolling(50).mean().to_numpy()
 
-    if isinstance(trend, pd.DataFrame):
-        trend = trend.iloc[:, 0]
+    # pad missing values at the beginning
+    if np.isnan(trend[0]):
+        first_valid = np.nanmin(trend)
+        trend = np.where(np.isnan(trend), first_valid, trend)
 
-    trend = trend.reindex(df.index, method="ffill")
+    df["Trend"] = pd.Series(trend, index=df.index)
 
-    df["Trend"] = trend
+    # --- TREND SIGNAL SAFE ---
+    trend_signal = np.where(df["Close"].to_numpy() > trend, 1, -1)
 
-    trend_signal = np.where(df["Close"].values > trend.values, 1, -1)
+    df["TrendSignal"] = pd.Series(trend_signal, index=df.index)
 
-    df["TrendSignal"] = pd.Series(trend_signal.flatten(), index=df.index)
-
+    # --- SIGNALS ---
     df["Signal"] = 0
     df.loc[df["AI_PredMove"] > df["Thr"], "Signal"] = 1
     df.loc[df["AI_PredMove"] < -df["Thr"], "Signal"] = -1
@@ -88,6 +100,9 @@ def backtest(df):
     return df
 
 
+# ============================
+# PERFORMANCE
+# ============================
 def performance(df):
     if "Equity" not in df or df["Equity"].dropna().empty:
         return {
@@ -108,6 +123,9 @@ def performance(df):
     }
 
 
+# ============================
+# PLOT EQUITY
+# ============================
 def plot_equity(df, title="AI V3 FAST – Equity Curve"):
     fig, ax = plt.subplots(figsize=(10, 4))
     ax.plot(df.index, df["Equity"], label="Strategy Equity")
@@ -117,6 +135,9 @@ def plot_equity(df, title="AI V3 FAST – Equity Curve"):
     return fig
 
 
+# ============================
+# STREAMLIT UI
+# ============================
 st.title("🚀 AI V3 FAST – Neural Trading Engine")
 
 col1, col2 = st.columns(2)
