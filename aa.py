@@ -1,17 +1,9 @@
-# ================================
-# AI V3 – PRO Python Engine
-# Predict + Auto‑Tune + Backtest
-# ================================
-
 import pandas as pd
 import numpy as np
 import yfinance as yf
 import matplotlib.pyplot as plt
 
 
-# ================================
-# 1) AI‑V3 PRO: Neural Similarity + Regime + MTF
-# ================================
 def ai_v3_pro(df, lookback=300, decay=0.65):
     df = df.copy()
 
@@ -23,29 +15,25 @@ def ai_v3_pro(df, lookback=300, decay=0.65):
     df["ATR_Norm"] = df["Range"] / df["ATR"]
     df["Vol_Norm"] = df["Volume"] / df["Volume"].rolling(20).mean()
 
-    # ============================
-    # Regime Detection (Daily)
-    # ============================
     close_series = df["Close"].astype(float)
 
+    # ============================
+    # Regime Detection
+    # ============================
     ma_trend = close_series.rolling(50).mean()
-    if isinstance(ma_trend, pd.DataFrame):
-        ma_trend = ma_trend.iloc[:, 0]
     ma_trend = ma_trend.reindex(df.index, method="ffill")
 
-    df["MA_Trend"] = ma_trend
-    df["Regime"] = np.where(close_series.values > ma_trend.values, 1, -1)
+    regime_array = np.where(close_series.values > ma_trend.values, 1, -1)
+    df["Regime"] = pd.Series(regime_array.flatten(), index=df.index)
 
     # ============================
-    # MTF Reinforcement (Weekly)
+    # MTF Reinforcement
     # ============================
     weekly_ma = close_series.resample("W").last().rolling(10).mean()
-    if isinstance(weekly_ma, pd.DataFrame):
-        weekly_ma = weekly_ma.iloc[:, 0]
     weekly_ma = weekly_ma.reindex(df.index, method="ffill")
 
-    df["MTF_MA"] = weekly_ma
-    df["MTF_Signal"] = np.where(close_series.values > weekly_ma.values, 1, -1)
+    mtf_array = np.where(close_series.values > weekly_ma.values, 1, -1)
+    df["MTF_Signal"] = pd.Series(mtf_array.flatten(), index=df.index)
 
     preds = []
 
@@ -106,47 +94,30 @@ def ai_v3_pro(df, lookback=300, decay=0.65):
     return df
 
 
-# ================================
-# 2) Auto‑Tune thresholds
-# ================================
 def auto_tune(df, window=200):
     df = df.copy()
-
     df["PredAbs"] = df["AI_PredMove"].abs()
     vol = df["PredAbs"].rolling(window).std()
-
     k = 0.7
     df["Thr"] = (vol * k).fillna(vol.mean() * k if not np.isnan(vol.mean()) else 0.0)
-
     return df
 
 
-# ================================
-# 3) Backtest
-# ================================
 def backtest_pro(df):
     df = df.copy()
-
     df["Signal"] = 0
     df.loc[df["AI_PredMove"] > df["Thr"], "Signal"] = 1
     df.loc[df["AI_PredMove"] < -df["Thr"], "Signal"] = -1
-
     df["Return"] = df["Close"].pct_change()
     df["Strategy"] = df["Signal"].shift(1) * df["Return"]
-
     df["Equity"] = (1 + df["Strategy"]).cumprod().fillna(1.0)
-
     return df
 
 
-# ================================
-# 4) Performance metrics
-# ================================
 def performance(df):
     total_return = df["Equity"].iloc[-1] - 1
     win_rate = (df["Strategy"] > 0).mean()
     max_dd = (df["Equity"].cummax() - df["Equity"]).max()
-
     return {
         "Total Return %": round(total_return * 100, 2),
         "Win Rate %": round(win_rate * 100, 2),
@@ -154,9 +125,6 @@ def performance(df):
     }
 
 
-# ================================
-# 5) Plot equity curve
-# ================================
 def plot_equity(df, title="AI V3 – Equity Curve"):
     plt.figure(figsize=(10, 5))
     plt.plot(df.index, df["Equity"], label="Strategy Equity")
@@ -169,18 +137,12 @@ def plot_equity(df, title="AI V3 – Equity Curve"):
     plt.show()
 
 
-# ================================
-# 6) Full example
-# ================================
 if __name__ == "__main__":
     ticker = "MSFT"
     df = yf.download(ticker, period="5y", interval="1d")
-
     df = df[["Open", "High", "Low", "Close", "Volume"]].dropna()
-
     df = ai_v3_pro(df)
     df = auto_tune(df)
     df = backtest_pro(df)
-
     print(performance(df))
     plot_equity(df)
