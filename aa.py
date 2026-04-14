@@ -63,27 +63,26 @@ def auto_tune(df, window=50):
 
 
 # ============================
-# BACKTEST (SAFE VERSION)
+# BACKTEST (NO ROLLING — NO ERRORS)
 # ============================
 def backtest(df):
     df = df.copy()
 
-    # --- TREND SAFE ---
-    trend = df["Close"].rolling(50).mean().to_numpy()
+    closes = df["Close"].to_numpy()
+    trend = np.zeros(len(df))
 
-    # pad missing values at the beginning
-    if np.isnan(trend[0]):
-        first_valid = np.nanmin(trend)
-        trend = np.where(np.isnan(trend), first_valid, trend)
+    # manual moving average (safe)
+    for i in range(len(df)):
+        start = max(0, i - 49)
+        trend[i] = closes[start:i+1].mean()
 
     df["Trend"] = pd.Series(trend, index=df.index)
 
-    # --- TREND SIGNAL SAFE ---
-    trend_signal = np.where(df["Close"].to_numpy() > trend, 1, -1)
-
+    # TrendSignal always same length
+    trend_signal = np.where(closes > trend, 1, -1)
     df["TrendSignal"] = pd.Series(trend_signal, index=df.index)
 
-    # --- SIGNALS ---
+    # Signals
     df["Signal"] = 0
     df.loc[df["AI_PredMove"] > df["Thr"], "Signal"] = 1
     df.loc[df["AI_PredMove"] < -df["Thr"], "Signal"] = -1
@@ -113,7 +112,7 @@ def performance(df):
         }
 
     total_return = df["Equity"].iloc[-1] - 1
-    win_rate = (df["Strategy"] > 0).mean() if "Strategy" in df else 0
+    win_rate = (df["Strategy"] > 0).mean()
     max_dd = (df["Equity"].cummax() - df["Equity"]).max()
 
     return {
@@ -169,12 +168,9 @@ if run:
         st.subheader("📊 Performance")
         st.write(performance(df))
 
-        if "Equity" in df and not df["Equity"].dropna().empty:
-            st.subheader("📈 Equity Curve")
-            fig = plot_equity(df, title=f"AI V3 FAST – Equity Curve ({ticker})")
-            st.pyplot(fig)
-        else:
-            st.warning("No equity curve available (no trades).")
+        st.subheader("📈 Equity Curve")
+        fig = plot_equity(df, title=f"AI V3 FAST – Equity Curve ({ticker})")
+        st.pyplot(fig)
 
         st.subheader("📄 Last 50 rows")
         st.dataframe(df.tail(50))
