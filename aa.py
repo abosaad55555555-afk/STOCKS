@@ -7,9 +7,6 @@ import matplotlib.pyplot as plt
 st.set_page_config(page_title="AI V3 PRO", layout="wide")
 
 
-# ============================
-# AI V3 FAST ENGINE
-# ============================
 def ai_v3_fast(df, lookback=50):
     df = df.copy()
 
@@ -47,9 +44,6 @@ def ai_v3_fast(df, lookback=50):
     return df
 
 
-# ============================
-# AUTO‑TUNE
-# ============================
 def auto_tune(df, window=50):
     df = df.copy()
     df["PredAbs"] = df["AI_PredMove"].abs()
@@ -62,9 +56,6 @@ def auto_tune(df, window=50):
     return df
 
 
-# ============================
-# BACKTEST (FINAL FIX)
-# ============================
 def backtest(df):
     df = df.copy()
 
@@ -78,7 +69,8 @@ def backtest(df):
     df["Trend"] = trend
 
     trend_signal = np.where(df["Close"].values > trend.values, 1, -1)
-    df["TrendSignal"] = trend_signal.flatten()
+
+    df["TrendSignal"] = pd.Series(trend_signal.flatten(), index=df.index)
 
     df["Signal"] = 0
     df.loc[df["AI_PredMove"] > df["Thr"], "Signal"] = 1
@@ -96,9 +88,6 @@ def backtest(df):
     return df
 
 
-# ============================
-# PERFORMANCE
-# ============================
 def performance(df):
     if "Equity" not in df or df["Equity"].dropna().empty:
         return {
@@ -119,9 +108,6 @@ def performance(df):
     }
 
 
-# ============================
-# PLOT EQUITY
-# ============================
 def plot_equity(df, title="AI V3 FAST – Equity Curve"):
     fig, ax = plt.subplots(figsize=(10, 4))
     ax.plot(df.index, df["Equity"], label="Strategy Equity")
@@ -131,9 +117,6 @@ def plot_equity(df, title="AI V3 FAST – Equity Curve"):
     return fig
 
 
-# ============================
-# STREAMLIT UI
-# ============================
 st.title("🚀 AI V3 FAST – Neural Trading Engine")
 
 col1, col2 = st.columns(2)
